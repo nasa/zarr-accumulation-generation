@@ -19,12 +19,10 @@ from codec_filter import (
 
 class Test_zarr_accumulation_entrypoint(unittest.TestCase):
     def test_GPM_3IMERGDF(self):
-        start_time = time.time()
-
         # Call zarr accumulation entrypoint
         runpy.run_path("../data_preparation/zarr_dask.py", run_name="__main__")
 
-        # Read in stats of ground-truth Zarr accumulation data
+        # Read in stats of ground-truth Zarr accumulation data (for all dimensions besides the binary latw and lonw)
         true_stats = np.load("dimension_stats_dict.npy", allow_pickle="TRUE").item()
 
         # Validate test output against true statistics
@@ -55,10 +53,20 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
             output_std = output_dim_da.std().compute()
             stats["std"].should.equal(output_std)
 
+        # For latw and lonw binary masks, compare the true vs test masks elementwise
+        binary_dims = ["latw", "lonw"]
+        for dim in binary_dims:
+            print(f"Validating test output in dimension: {dim}")
+            true_path = f"../data_preparation/data/GPM_3IMERGHH_06_precipitationCal_out"
+            z_true = zarr.open(true_path, mode="r")
+            latw_true = z_true[dim]
+
+            latw_output = z_output[dim]
+            match_count = np.sum(latw_true[:, :, :] == latw_output[:, :, :])
+            match_count.should.equal(latw_true.size)
+
         # Clean up local output store - maybe this should be optional with flag
         shutil.rmtree(output_path)
-
-        print(f"Integration test took: {time.time() - start_time}")
 
 
 if __name__ == "__main__":
