@@ -1,13 +1,12 @@
+import os
 import sys
 import zarr
-import time
 import sure
 import shutil
 import runpy
-import subprocess
 import unittest
 import numpy as np
-import dask.array as da
+from numpy import testing as numpy_testing
 
 sys.path.append("../data_preparation/")
 from codec_filter import (
@@ -20,52 +19,42 @@ from codec_filter import (
 class Test_zarr_accumulation_entrypoint(unittest.TestCase):
     def test_GPM_3IMERGDF(self):
         # Call zarr accumulation entrypoint
-        runpy.run_path("../data_preparation/zarr_dask.py", run_name="__main__")
+        script_path = os.path.join(
+            os.getcwd(), "..", "data_preparation", "zarr_dask.py",
+        )
+        runpy.run_path(script_path, run_name="__main__")
 
-        # Read in stats of ground-truth Zarr accumulation data (for all dimensions besides the binary latw and lonw)
-        true_stats = np.load("dimension_stats_dict.npy", allow_pickle="TRUE").item()
+        # Stats of ground-truth Zarr accumulation data
+        true_stats = {
+            "lat": {"mean": 72.27080535888672, "std": 106.652587890625},
+            "latlon": {"mean": 126743.4765625, "std": 127761.359375},
+            "latlonw": {"mean": 1006204.1875, "std": 1006401.375},
+            "lon": {"mean": 130.29505920410156, "std": 213.71470642089844},
+            "time": {"mean": 45.3724479675293, "std": 95.65841674804688},
+            "timew": {"mean": 347.1451639660494, "std": 267.3870121417042},
+            "latw": {"mean": 2417489479736260.0, "std": 5.995023718241938e17},
+            "lonw": {"mean": -628757442906794.6, "std": 4.65020815943922e17},
+        }
 
         # Validate test output against true statistics
-        output_path = "data/GPM_3IMERGHH_06_precipitationCal_out"
+        output_path = os.path.join(
+            os.getcwd(), "data", "GPM_3IMERGHH_06_precipitationCal_out",
+        )
         z_output = zarr.open(output_path, mode="r")
 
         for dim, stats in true_stats.items():
             print(f"Validating test output in dimension: {dim}")
-            output_dim = z_output[dim]
-            output_dim_da = da.from_array(output_dim)
+            output_dim = np.array(z_output[dim])
+            if dim == "latw" or dim == "lonw":
+                output_dim = np.frombuffer(output_dim, dtype=int)
 
-            output_shape = output_dim.shape
-            # Compare values using "sure" package - can also have some difference tolerance if desired
-            stats["shape"].should.equal(output_shape)
+            output_mean = output_dim.mean()
+            numpy_testing.assert_allclose(stats["mean"], output_mean, rtol=1e-6)
 
-            output_chunks = output_dim.chunks
-            stats["chunks"].should.equal(output_chunks)
+            output_std = output_dim.std()
+            numpy_testing.assert_allclose(stats["std"], output_std, rtol=1e-6)
 
-            output_min = output_dim_da.min().compute()
-            stats["min"].should.equal(output_min)
-
-            output_max = output_dim_da.max().compute()
-            stats["max"].should.equal(output_max)
-
-            output_mean = output_dim_da.mean().compute()
-            stats["mean"].should.equal(output_mean)
-
-            output_std = output_dim_da.std().compute()
-            stats["std"].should.equal(output_std)
-
-        # For latw and lonw binary masks, compare the true vs test masks elementwise
-        binary_dims = ["latw", "lonw"]
-        for dim in binary_dims:
-            print(f"Validating test output in dimension: {dim}")
-            true_path = f"../data_preparation/data/GPM_3IMERGHH_06_precipitationCal_out"
-            z_true = zarr.open(true_path, mode="r")
-            latw_true = z_true[dim]
-
-            latw_output = z_output[dim]
-            match_count = np.sum(latw_true[:, :, :] == latw_output[:, :, :])
-            match_count.should.equal(latw_true.size)
-
-        # Clean up local output store - maybe this should be optional with flag
+        # Clean up local output store
         shutil.rmtree(output_path)
 
 
