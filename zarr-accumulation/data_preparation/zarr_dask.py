@@ -95,13 +95,7 @@ def f_time(dz, dzw, ztime, ztimew, calat_in_time, natime, catime, nlon, a, b):
 if __name__ == '__main__':
 
     # Locals
-    flag_remote = True
-    if flag_remote:
-        store_input = s3fs.S3Map(root='s3://uat-giovanni-cache/zarr/GPM_3IMERGHH_06_precipitationCal/',
-                s3=s3fs.S3FileSystem(),
-                check=False)
-    else:
-        store_input = zarr.DirectoryStore('data/GPM_3IMERGHH_06_precipitationCal')
+    store_input = zarr.DirectoryStore('data/GPM_3IMERGHH_06_precipitationCal')
     store_output = zarr.DirectoryStore('data/GPM_3IMERGHH_06_precipitationCal_out')
     root = zarr.open(store_output, mode='a')
     root_local = root
