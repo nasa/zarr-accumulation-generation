@@ -5,11 +5,9 @@ import sure
 import shutil
 import runpy
 import unittest
-import numpy as np
-from numpy import testing as numpy_testing
 
 sys.path.append("../data_preparation/")
-from codec_filter import (
+from codec_filter_small import (
     DeltaLat,
     DeltaLon,
     DeltaTime,
@@ -17,42 +15,36 @@ from codec_filter import (
 
 
 class Test_zarr_accumulation_entrypoint(unittest.TestCase):
-    def test_GPM_3IMERGDF(self):
-        # Call zarr accumulation entrypoint
+    def test_random_data(self):
+        # Call zarr accumulation entrypoint - still write out data to file
         script_path = os.path.join(
             os.getcwd(), "..", "data_preparation", "zarr_dask.py",
         )
         runpy.run_path(script_path, run_name="__main__")
 
-        # Stats of ground-truth Zarr accumulation data
-        true_stats = {
-            "lat": {"mean": 72.27080535888672, "std": 106.652587890625},
-            "latlon": {"mean": 126743.4765625, "std": 127761.359375},
-            "latlonw": {"mean": 1006204.1875, "std": 1006401.375},
-            "lon": {"mean": 130.29505920410156, "std": 213.71470642089844},
-            "time": {"mean": 45.3724479675293, "std": 95.65841674804688},
-            "timew": {"mean": 347.1451639660494, "std": 267.3870121417042},
-            "latw": {"mean": 2417489479736260.0, "std": 5.995023718241938e17},
-            "lonw": {"mean": -628757442906794.6, "std": 4.65020815943922e17},
+        # Ground-truth checksums 
+        true_checksums = {
+            "lat": "54c86fe1b52cba22942f6336ec3ba90bbd0d1e93", 
+            "latlon": "52698f884f334ab88366d014f61621d2aa83516f", 
+            "latlonw": "e570ba799faef0011cf3259ee3738ece5b0d9f31", 
+            "lon": "fff15a819256f0f22cfb7554ba6aac4fbd9979ef", 
+            "time": "806a2117442c3b5a22ab15fa452caa46975f1a7f", 
+            "timew": "6b66aa41ff769fd470136022889e2edfcc3afcef", 
+            "latw": "a68fee36129b5b96f4e5c534a77c01c312f02198", 
+            "lonw": "8cbc91a53692acc9f3ac7a4beedc93faf6003429"
         }
 
-        # Validate test output against true statistics
+        # Validate
         output_path = os.path.join(
-            os.getcwd(), "data", "GPM_3IMERGHH_06_precipitationCal_out",
+            os.getcwd(), "data", "test_out",
         )
         z_output = zarr.open(output_path, mode="r")
 
-        for dim, stats in true_stats.items():
+        for dim, checksum in true_checksums.items():
             print(f"Validating test output in dimension: {dim}")
-            output_dim = np.array(z_output[dim])
-            if dim == "latw" or dim == "lonw":
-                output_dim = np.frombuffer(output_dim, dtype=int)
-
-            output_mean = output_dim.mean()
-            numpy_testing.assert_allclose(stats["mean"], output_mean, rtol=1e-6)
-
-            output_std = output_dim.std()
-            numpy_testing.assert_allclose(stats["std"], output_std, rtol=1e-6)
+            output_dim = z_output[dim]
+            output_checksum = output_dim.hexdigest()
+            assert output_checksum == checksum
 
         # Clean up local output store
         shutil.rmtree(output_path)
