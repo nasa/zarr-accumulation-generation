@@ -252,7 +252,7 @@ if __name__ == "__main__":
         # Generate random data
         np.random.seed(0)
         chunks = (36, 72, 100)
-        z = np.random.rand(144, 288, 400)
+        z = np.random.rand(144, 288, 200)
         z[z < 0.2] = -99
         (nlat, nlon, ntime) = z.shape
         (clat, clon, ctime) = chunks
