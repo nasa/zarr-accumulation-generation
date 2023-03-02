@@ -244,13 +244,15 @@ if __name__ == "__main__":
 
     test_mode = True
     if test_mode:
+        from codec_filter_small import DeltaLat, DeltaLon, DeltaTime
+
         # Locals
         store_output = zarr.DirectoryStore("data/test_out")
 
         # Generate random data
         np.random.seed(0)
         chunks = (36, 72, 100)
-        z = np.random.rand(72, 144, 200)
+        z = np.random.rand(144, 288, 400)
         z[z < 0.2] = -99
         (nlat, nlon, ntime) = z.shape
         (clat, clon, ctime) = chunks
@@ -266,7 +268,7 @@ if __name__ == "__main__":
         (nlat, nlon, ntime) = shape
         (clat, clon, ctime) = chunks
 
-    root = zarr.open(store_output, mode="a")
+    root = zarr.open(store_output, mode="w")
     root_local = root
 
     clat *= 2  # NOTE coarse

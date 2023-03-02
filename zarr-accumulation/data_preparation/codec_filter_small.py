@@ -15,7 +15,7 @@ class DeltaLat(Codec):
         return out
 
     def decode(self, buf, out=None):
-        enc = np.frombuffer(buf, dtype="f4").reshape((1, 100, 144))
+        enc = np.frombuffer(buf, dtype="f4").reshape((2, 100, 144))
         out = np.cumsum(enc, axis=0, out=out)
         return out
 
@@ -36,7 +36,7 @@ class DeltaLon(Codec):
         return out
 
     def decode(self, buf, out=None):
-        enc = np.frombuffer(buf, dtype="f4").reshape((1, 100, 72))
+        enc = np.frombuffer(buf, dtype="f4").reshape((2, 100, 72))
         out = np.cumsum(enc, axis=0, out=out)
         return out
 
@@ -52,7 +52,7 @@ class DeltaTime(Codec):
         return out
 
     def decode(self, buf, out=None):
-        enc = np.frombuffer(buf, dtype="f4").reshape((8, 100, 144))
+        enc = np.frombuffer(buf, dtype="f4").reshape((8, 100, 288))
         out = np.cumsum(enc, axis=1, out=out)
         return out
 
@@ -68,7 +68,7 @@ class DeltaTimeW(Codec):
         return out
 
     def decode(self, buf, out=None):
-        enc = np.frombuffer(buf, dtype="f4").reshape((8, 100, 144))
+        enc = np.frombuffer(buf, dtype="f4").reshape((8, 100, 288))
         out = np.cumsum(enc, axis=1, out=out, dtype="uint32")
         return out
 
