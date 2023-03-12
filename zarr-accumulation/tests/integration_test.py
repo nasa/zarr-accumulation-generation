@@ -1,7 +1,6 @@
 import os
 import sys
 import zarr
-import sure
 import shutil
 import runpy
 import unittest
