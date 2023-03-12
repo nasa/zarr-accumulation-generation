@@ -4,7 +4,7 @@ name: Github actions
 
 on:
   push:
-    branches: [ main ]
+    branches: [ 9-add-github-workflow-for-the-integration-test ]
   pull_request:
     branches: [ main ]
 
