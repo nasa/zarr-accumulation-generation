@@ -31,7 +31,7 @@ jobs:
         
     - name: Run test
       run: |
-        bin/test >& test_results-${{ matrix.python-version }}.txt
+        ls -altrh && bin/test >& test_results-${{ matrix.python-version }}.txt
 
     - name: Generate coverage report
       if: ${{ always() }}
