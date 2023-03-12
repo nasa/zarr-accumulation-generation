@@ -31,12 +31,13 @@ jobs:
         
     - name: Run test
       run: |
-        ls -altrh bin/ && . bin/test >& test_results-${{ matrix.python-version }}.txt
+        bin/test >& test_results-${{ matrix.python-version }}.txt
 
     - name: Generate coverage report
       if: ${{ always() }}
       run: |
-        coverage report -m >& coverage_report-${{ matrix.python-version }}.txt
+        cd zarr-accumulation/tests/ &&
+        coverage report -m >& coverage_report-${{ matrix.python-version }}.txt &&
         coverage html --dir htmlcov-${{ matrix.python-version }}
 
     - name: Archive test results
