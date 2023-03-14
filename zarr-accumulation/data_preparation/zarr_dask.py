@@ -107,16 +107,24 @@ def f_latlon_ptime(
     )
 
     idx_2 = idx_1 + ctime
-    olatlon = data[:, :, idx_1:idx_2]
-    olatlon = olatlon.cumsum(axis=0).cumsum(axis=1).astype("float32")
+    olatlon = (
+        data[:, :, idx_1:idx_2]
+        .cumsum(axis=0)
+        .cumsum(axis=1)
+        .astype("float32")
+    )
 
     idx_3 = idx_2 + ctime
-    olatlonw = data[:, :, idx_2:idx_3]
-    olatlonw = olatlonw.cumsum(axis=0).cumsum(axis=1).astype("float32")
+    olatlonw = (
+        data[:, :, idx_2:idx_3]
+        .cumsum(axis=0)
+        .cumsum(axis=1)
+        .astype("float32")
+    )
 
     idx_4 = idx_3 + (clat * clon)
     otime = data[:, :, idx_3:idx_4] 
-    otime = otime.reshape(nlon,-1)
+    otime = otime.reshape(nlon, -1)
     nalat = int(nlat / clat)
     nalon = int(nlon / clon)
     num_chunks = nalat * nalon
@@ -131,19 +139,17 @@ def f_latlon_ptime(
     otimetemp = otime_new.reshape(nlat, nlon, 1)
 
     idx_5 = idx_4 + (nlat * nlon)
-    otimetempw = data[:, :, idx_4:idx_5] 
-    arr_new = otimetempw.reshape(nlon,-1)
-    nalat = int(nlat / clat)
-    nalon = int(nlon / clon)
-    new = np.empty((nlat, nlon))
+    otimew = data[:, :, idx_4:idx_5] 
+    otimew = otimew.reshape(nlon, -1)
+    otimew_new = np.empty((nlat, nlon))
     row_i = 0
     for chunk_i in range(num_chunks):
         if chunk_i % 2 == 0:
-            new[row_i:row_i+clat, :nlat] = arr_new[chunk_i*clat:chunk_i*clat+clat, :nlat]
+            otimew_new[row_i:row_i+clat, :nlat] = otimew[chunk_i*clat:chunk_i*clat+clat, :nlat]
         else: 
-            new[row_i:row_i+clat, nlat:nlon] = arr_new[chunk_i*clat:chunk_i*clat+clat, :nlat]
+            otimew_new[row_i:row_i+clat, nlat:nlon] = otimew[chunk_i*clat:chunk_i*clat+clat, :nlat]
             row_i += clat
-    otimetempw = new.reshape(nlat, nlon, 1)
+    otimetempw = otimew_new.reshape(nlat, nlon, 1)
 
     # save to zarr
     zlat[:, a:b, :] = olat
