@@ -22,60 +22,31 @@ s3 = s3fs.S3FileSystem()
 def compute_block_sum(block, block_info=None, wd=None, axis=0):
     if not block_info:
         return block
+
     (s0, s1, s2) = block.shape
     (i1, i2) = block_info[0]["array-location"][0]
-    mask = block >= 0
-    w = mask * (wd[i1:i2].reshape(s0, 1, 1))
-    ow = block * w
+    mask = block >= 0 
+    w = mask * (wd[i1:i2].reshape(s0, 1, 1)) 
+    ow = block * w 
+
+    # Note: Skipping latw and lonw for now
     olat_sm = ow.sum(axis=0)
-    olon_sm = np.concatenate(
-        (ow.sum(axis=1), np.zeros((s1 - s0, s2), dtype=block.dtype)), axis=0
-    )
-    olat_wt = (
-        np.frombuffer(bytes(bytearray(np.packbits(mask, axis=0).T)), dtype="|S9")
-        .reshape(s2, s1)
-        .T
-    )
-    olon_wt = (
-        np.frombuffer(
-            bytes(bytearray(np.packbits(mask, axis=1).transpose(2, 0, 1))), dtype="|S9"
-        )
-        .reshape(s2, s1)
-        .T
-    )
-    """
-    olon_wt = np.concatenate(
-                ( np.frombuffer(bytes(bytearray(np.packbits(mask, axis=1).transpose(2,0,1))),dtype='|S18').reshape(s2,s0).T,
-                  np.zeros((s1-s0, s2), dtype='|S18') ),
-                axis=0)
-    """
+    olon_sm = ow.sum(axis=1)
     olatlon_sm = olat_sm.sum(axis=0)
     olatlon_wt = w.sum(axis=(0, 1))
     otime_sm = ow.sum(axis=2)
     otime_wt = w.sum(axis=2)
-    otime_sm = np.resize(np.append(otime_sm.flatten(), olatlon_sm), s1 * s2).reshape(
-        s1, s2
-    )
-    otime_wt = np.resize(np.append(otime_wt.flatten(), olatlon_wt), s1 * s2).reshape(
-        s1, s2
-    )
-    """
-    otime_sm = np.resize(np.append(ow.sum(axis=2).flatten(), olat_sm.sum(axis=0)), s1*s2).reshape(s1,s2) 
-    otime_wt = np.resize(np.append(w.sum(axis=2).flatten(), w.sum(axis=(0,1))), s1*s2).reshape(s1,s2)
-    """
 
-    o = np.core.records.fromarrays(
-        [olat_sm, olat_wt, olon_sm, olon_wt, otime_sm, otime_wt],
-        dtype=[
-            ("lat_sm", "f8"),
-            ("lat_wt", "|S9"),
-            ("lon_sm", "f8"),
-            ("lon_wt", "|S9"),
-            ("time_sm", "f8"),
-            ("time_wt", "f8"),
-        ],
-    ).reshape(1, s1, s2)
-    return o
+    output = np.concatenate((
+                        olat_sm.flatten(), 
+                        olon_sm.flatten(),
+                        olatlon_sm.flatten(),
+                        olatlon_wt.flatten(),
+                        otime_sm.flatten(), 
+                        otime_wt.flatten()
+            ))
+    output = output.reshape(1,1,len(output))
+    return output
 
 
 def f_latlon_ptime(
@@ -111,111 +82,76 @@ def f_latlon_ptime(
         .map_blocks(compute_block_sum, wd=wd, chunks=(clat, clon, ctime))
         .compute()
     )
+
     print("compute used: ", time.time() - t0)
     t0 = time.time()
 
     # extract data
+    idx_0 = clon * ctime
+    olat = (
+        data[:, :, :idx_0]
+        .reshape((nalat, nlon, -1))
+        .cumsum(axis=0)
+        .transpose((0,2,1))
+        .astype("float32")
+    )
+
+    idx_1 = idx_0 + (clat * ctime)
     olon = (
-        np.array(
-            [
-                data["lon_sm"][
-                    (i % nalat), int(i / nalat) * clon : int(i / nalat) * clon + clat, :
-                ].flatten()
-                for i in range(nalat * nalon)
-            ]
-        )
-        .reshape(nalon, nlat, -1)
+        data[:, :, idx_0:idx_1]
+        .transpose((1, 0, 2))
+        .reshape((nalon, nlat, -1))
+        .cumsum(axis=0)
         .transpose((0, 2, 1))
+        .astype("float32")
     )
-    # olonw = np.array([data['lon_wt'][(i%nalat), int(i/nalat)*clon : int(i/nalat)*clon +clat, :].flatten() for i in range(nalat*nalon)]).reshape(nalon, nlat, -1).transpose((0, 2, 1))
-    olonw = (
-        np.array(
-            [
-                np.frombuffer(
-                    data["lon_wt"][
-                        (i % nalat),
-                        int(i / nalat) * clon : int(i / nalat + 1) * clon,
-                        :,
-                    ].tobytes(),
-                    dtype="|S18",
-                ).flatten()
-                for i in range(nalat * nalon)
-            ]
-        )
-        .reshape(nalon, nlat, -1)
-        .transpose((0, 2, 1))
-    )
-    otimetemp = np.concatenate(
-        [
-            np.concatenate(
-                [
-                    data["time_sm"][ilat, (ilon * clon) : ((ilon + 1) * clon)]
-                    .flatten()[: clat * clon]
-                    .reshape(clat, clon)
-                    for ilon in range(nalon)
-                ],
-                axis=1,
-            )
-            for ilat in range(nalat)
-        ],
-        axis=0,
-    ).reshape(nlat, nlon, 1)
-    otimetempw = np.concatenate(
-        [
-            np.concatenate(
-                [
-                    data["time_wt"][ilat, (ilon * clon) : ((ilon + 1) * clon)]
-                    .flatten()[: clat * clon]
-                    .reshape(clat, clon)
-                    for ilon in range(nalon)
-                ],
-                axis=1,
-            )
-            for ilat in range(nalat)
-        ],
-        axis=0,
-    ).reshape(nlat, nlon, 1)
-    olatlon = np.concatenate(
-        [
-            [
-                data["time_sm"][ilat, (ilon * clon) : ((ilon + 1) * clon), :].flatten()[
-                    (clat * clon) : (clat * clon + ctime)
-                ]
-                for ilon in range(nalon)
-            ]
-            for ilat in range(nalat)
-        ]
-    ).reshape(nalat, nalon, ctime)
-    olatlonw = np.concatenate(
-        [
-            [
-                data["time_wt"][ilat, (ilon * clon) : ((ilon + 1) * clon), :].flatten()[
-                    (clat * clon) : (clat * clon + ctime)
-                ]
-                for ilon in range(nalon)
-            ]
-            for ilat in range(nalat)
-        ]
-    ).reshape(nalat, nalon, ctime)
-    print("extract used: ", time.time() - t0)
-    t0 = time.time()
+
+    idx_2 = idx_1 + ctime
+    olatlon = data[:, :, idx_1:idx_2]
+    olatlon = olatlon.cumsum(axis=0).cumsum(axis=1).astype("float32")
+
+    idx_3 = idx_2 + ctime
+    olatlonw = data[:, :, idx_2:idx_3]
+    olatlonw = olatlonw.cumsum(axis=0).cumsum(axis=1).astype("float32")
+
+    idx_4 = idx_3 + (clat * clon)
+    otime = data[:, :, idx_3:idx_4] 
+    otime = otime.reshape(nlon,-1)
+    nalat = int(nlat / clat)
+    nalon = int(nlon / clon)
+    num_chunks = nalat * nalon
+    otime_new = np.empty((nlat, nlon))
+    row_i = 0
+    for chunk_i in range(num_chunks):
+        if chunk_i % 2 == 0:
+            otime_new[row_i:row_i+clat, :nlat] = otime[chunk_i*clat:chunk_i*clat+clat, :nlat]
+        else: 
+            otime_new[row_i:row_i+clat, nlat:nlon] = otime[chunk_i*clat:chunk_i*clat+clat, :nlat] 
+            row_i += clat
+    otimetemp = otime_new.reshape(nlat, nlon, 1)
+
+    idx_5 = idx_4 + (nlat * nlon)
+    otimetempw = data[:, :, idx_4:idx_5] 
+    arr_new = otimetempw.reshape(nlon,-1)
+    nalat = int(nlat / clat)
+    nalon = int(nlon / clon)
+    new = np.empty((nlat, nlon))
+    row_i = 0
+    for chunk_i in range(num_chunks):
+        if chunk_i % 2 == 0:
+            new[row_i:row_i+clat, :nlat] = arr_new[chunk_i*clat:chunk_i*clat+clat, :nlat]
+        else: 
+            new[row_i:row_i+clat, nlat:nlon] = arr_new[chunk_i*clat:chunk_i*clat+clat, :nlat]
+            row_i += clat
+    otimetempw = new.reshape(nlat, nlon, 1)
 
     # save to zarr
-    zlat[:, a:b, :] = (
-        data["lat_sm"][:, :, :].cumsum(axis=0).transpose((0, 2, 1)).astype("float32")
-    )
-    zlatw[:, a:b, :] = data["lat_wt"][:].transpose((0, 2, 1))
-    zlon[:, a:b, :] = olon[:, :, :].cumsum(axis=0).astype("float32")
-    zlonw[:, a:b, :] = olonw[:, :, :]
-    zlatlon[:, :, a:b] = (
-        olatlon[:, :, : (b - a)].cumsum(axis=0).cumsum(axis=1).astype("float32")
-    )
-    zlatlonw[:, :, a:b] = (
-        olatlonw[:, :, : (b - a)].cumsum(axis=0).cumsum(axis=1).astype("float32")
-    )
-    ztimetemp[:, :, idx_acc_time : idx_acc_time + 1] = otimetemp[:, :, :]
-    ztimetempw[:, :, idx_acc_time : idx_acc_time + 1] = otimetempw[:, :, :]
-    print("save used: ", time.time() - t0)
+    zlat[:, a:b, :] = olat
+    zlon[:, a:b, :] = olon
+    zlatlon[:, :, a:b] = olatlon
+    zlatlonw[:, :, a:b] = olatlonw 
+    ztimetemp[:, :, idx_acc_time : idx_acc_time + 1] = otimetemp
+    ztimetempw[:, :, idx_acc_time : idx_acc_time + 1] = otimetempw 
     return
 
 
@@ -389,12 +325,14 @@ if __name__ == "__main__":
     batch_size = 100
     (natime_start, natime_end) = (0, natime)
     # (natime_start, natime_end) = (int(330000/200), natime)
-    for batch_start in range(natime_start, natime_end, batch_size):
+    for batch_start in range(natime_start, natime_end, batch_size): 
         print("Batch: ", batch_start)
+
         pp = []
         batch_end = min(batch_start + batch_size, natime_end)
         for i in range(batch_start, batch_end):
-            print("Range: ", i * ctime, (i + 1) * ctime)
+            print("Range: ", i * ctime, (i + 1) * ctime) 
+
             p = Process(
                 target=f_latlon_ptime,
                 args=(
