@@ -74,6 +74,9 @@ def f_latlon_ptime(
 
     # some locals
     idx_acc_time = int(a / ctime)
+    nalat = int(nlat / clat)
+    nalon = int(nlon / clon)
+    num_chunks = nalat * nalon
 
     # compute
     t0 = time.time()
@@ -121,13 +124,10 @@ def f_latlon_ptime(
         .cumsum(axis=1)
         .astype("float32")
     )
-
+    
     idx_4 = idx_3 + (clat * clon)
     otime = data[:, :, idx_3:idx_4] 
     otime = otime.reshape(nlon, -1)
-    nalat = int(nlat / clat)
-    nalon = int(nlon / clon)
-    num_chunks = nalat * nalon
     otime_new = np.empty((nlat, nlon))
     row_i = 0
     for chunk_i in range(num_chunks):
@@ -184,7 +184,7 @@ def f_time(dz, dzw, ztime, ztimew, calat_in_time, natime, catime, nlon, a, b):
 if __name__ == "__main__":
     start = time.time()
 
-    test_mode = True
+    test_mode = False
     if test_mode:
         from codec_filter_small import DeltaLat, DeltaLon, DeltaTime
 
