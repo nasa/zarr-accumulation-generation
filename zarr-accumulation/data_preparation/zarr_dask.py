@@ -184,7 +184,7 @@ def f_time(dz, dzw, ztime, ztimew, calat_in_time, natime, catime, nlon, a, b):
 if __name__ == "__main__":
     start = time.time()
 
-    test_mode = False
+    test_mode = True
     if test_mode:
         from codec_filter_small import DeltaLat, DeltaLon, DeltaTime
 
