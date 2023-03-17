@@ -19,9 +19,12 @@ compressor = Blosc(cname="zstd", clevel=5, shuffle=Blosc.SHUFFLE)
 s3 = s3fs.S3FileSystem()
 
 
-def compute_block_sum(block, block_info=None, wd=None, axis=0):
+def compute_block_sum(block, block_info=None, ot=None, wd=None, axis=0):
     if not block_info:
         return block
+
+    [(ilat1, ilat2), (ilon1, ilon2), _] = block_info[0]["array-location"]
+    print((ilat1, ilat2), (ilon1, ilon2))
 
     (s0, s1, s2) = block.shape
     (i1, i2) = block_info[0]["array-location"][0]
@@ -36,6 +39,8 @@ def compute_block_sum(block, block_info=None, wd=None, axis=0):
     olatlon_wt = w.sum(axis=(0, 1))
     otime_sm = ow.sum(axis=2)
     otime_wt = w.sum(axis=2)
+    print(otime_sm.shape)
+    ot[ilat1:ilat2, ilon1:ilon2] = otime_sm
 
     output = np.concatenate((
                         olat_sm.flatten(), 
@@ -78,11 +83,12 @@ def f_latlon_ptime(
     nalon = int(nlon / clon)
     num_chunks = nalat * nalon
 
+    otime_new = np.empty((nlat, nlon))
     # compute
     t0 = time.time()
     data = (
         dd[:, :, a:b]
-        .map_blocks(compute_block_sum, wd=wd, chunks=(clat, clon, ctime))
+        .map_blocks(compute_block_sum, ot=otime_new, wd=wd, chunks=(clat, clon, ctime))
         .compute()
     )
 
@@ -128,7 +134,8 @@ def f_latlon_ptime(
     idx_4 = idx_3 + (clat * clon)
     otime = data[:, :, idx_3:idx_4] 
     otime = otime.reshape(nlon, -1)
-    otime_new = np.empty((nlat, nlon))
+    # otime_new = np.empty((nlat, nlon))
+    '''
     row_i = 0
     for chunk_i in range(num_chunks):
         if chunk_i % 2 == 0:
@@ -136,10 +143,12 @@ def f_latlon_ptime(
         else: 
             otime_new[row_i:row_i+clat, nlat:nlon] = otime[chunk_i*clat:chunk_i*clat+clat, :nlat] 
             row_i += clat
+    '''
+    print(otime_new.shape)
     otimetemp = otime_new.reshape(nlat, nlon, 1)
 
     idx_5 = idx_4 + (nlat * nlon)
-    otimew = data[:, :, idx_4:idx_5] 
+    otimew = data[:, :, idx_4:idx_5]
     otimew = otimew.reshape(nlon, -1)
     otimew_new = np.empty((nlat, nlon))
     row_i = 0
