@@ -19,18 +19,36 @@ compressor = Blosc(cname="zstd", clevel=5, shuffle=Blosc.SHUFFLE)
 s3 = s3fs.S3FileSystem()
 
 
-def compute_block_sum(block, block_info=None, ot=None, wd=None, axis=0):
+def compute_block_sum(
+    block,
+    block_info=None,
+    olat=None,
+    olon=None,
+    olatlon=None,
+    olatlonw=None,
+    otime=None,
+    otimew=None,
+    wd=None,
+    axis=0,
+):
     if not block_info:
         return block
 
-    [(ilat1, ilat2), (ilon1, ilon2), _] = block_info[0]["array-location"]
-    print((ilat1, ilat2), (ilon1, ilon2))
+    [(ilat1, ilat2), (ilon1, ilon2), (itime1, itime2)] = block_info[0]["array-location"]
+    # print(
+    #     ("ilat1, ilat2), (ilon1, ilon2), (itime1, itime2): ", ilat1, ilat2),
+    #     (ilon1, ilon2),
+    #     (itime1, itime2),
+    # )
+
+    (ci1, ci2, ci3) = block_info[0]["chunk-location"]
+    # print("(ci1, ci2, ci3)", (ci1, ci2, ci3))
 
     (s0, s1, s2) = block.shape
     (i1, i2) = block_info[0]["array-location"][0]
-    mask = block >= 0 
-    w = mask * (wd[i1:i2].reshape(s0, 1, 1)) 
-    ow = block * w 
+    mask = block >= 0
+    w = mask * (wd[i1:i2].reshape(s0, 1, 1))
+    ow = block * w
 
     # Note: Skipping latw and lonw for now
     olat_sm = ow.sum(axis=0)
@@ -39,19 +57,19 @@ def compute_block_sum(block, block_info=None, ot=None, wd=None, axis=0):
     olatlon_wt = w.sum(axis=(0, 1))
     otime_sm = ow.sum(axis=2)
     otime_wt = w.sum(axis=2)
-    print(otime_sm.shape)
-    ot[ilat1:ilat2, ilon1:ilon2] = otime_sm
 
-    output = np.concatenate((
-                        olat_sm.flatten(), 
-                        olon_sm.flatten(),
-                        olatlon_sm.flatten(),
-                        olatlon_wt.flatten(),
-                        otime_sm.flatten(), 
-                        otime_wt.flatten()
-            ))
-    output = output.reshape(1,1,len(output))
-    return output
+    # olat[ilon1:ilon2, itime1:itime2] = olat_sm # doesn't work due to duplicate indices
+    # So using chunk-location
+    olat[ci1, ci2, :] = olat_sm.reshape(1, 1, -1)
+    olon[ci1, ci2, :] = olon_sm.reshape(1, 1, -1)
+    olatlon[ci1, ci2, :] = olatlon_sm.reshape(1, 1, -1)
+    olatlonw[ci1, ci2, :] = olatlon_wt.reshape(1, 1, -1)
+
+    # These dimensions can use array-location
+    otime[ilat1:ilat2, ilon1:ilon2] = otime_sm
+    otimew[ilat1:ilat2, ilon1:ilon2] = otime_wt
+
+    return block  # dummy return, map_blocks() requires func to return something besides None?
 
 
 def f_latlon_ptime(
@@ -81,92 +99,59 @@ def f_latlon_ptime(
     idx_acc_time = int(a / ctime)
     nalat = int(nlat / clat)
     nalon = int(nlon / clon)
-    num_chunks = nalat * nalon
 
-    otime_new = np.empty((nlat, nlon))
+    # initialize output arrays
+    olat = np.empty((nalat, nalon, clon * ctime))  # 2, 2, 14400
+    olon = np.empty((nalat, nalon, clat * ctime))
+    olatlon = np.empty((nalat, nalon, ctime))
+    olatlonw = np.empty((nalat, nalon, ctime))
+    otime = np.empty((nlat, nlon))
+    otimew = np.empty((nlat, nlon))
+
     # compute
     t0 = time.time()
-    data = (
+    _ = (
         dd[:, :, a:b]
-        .map_blocks(compute_block_sum, ot=otime_new, wd=wd, chunks=(clat, clon, ctime))
+        .map_blocks(
+            compute_block_sum,
+            olat=olat,
+            olon=olon,
+            olatlon=olatlon,
+            olatlonw=olatlonw,
+            otime=otime,
+            otimew=otimew,
+            wd=wd,
+            chunks=(clat, clon, ctime),
+        )
         .compute()
     )
 
     print("compute used: ", time.time() - t0)
     t0 = time.time()
 
-    # extract data
-    idx_0 = clon * ctime
-    olat = (
-        data[:, :, :idx_0]
-        .reshape((nalat, nlon, -1))
+    # save to zarr
+    zlat[:, a:b, :] = (
+        olat.reshape((nalat, nlon, -1))
         .cumsum(axis=0)
-        .transpose((0,2,1))
+        .transpose((0, 2, 1))
         .astype("float32")
     )
-
-    idx_1 = idx_0 + (clat * ctime)
-    olon = (
-        data[:, :, idx_0:idx_1]
-        .transpose((1, 0, 2))
+    zlon[:, a:b, :] = olon = (
+        olon.transpose((1, 0, 2))
         .reshape((nalon, nlat, -1))
         .cumsum(axis=0)
         .transpose((0, 2, 1))
         .astype("float32")
     )
-
-    idx_2 = idx_1 + ctime
-    olatlon = (
-        data[:, :, idx_1:idx_2]
-        .cumsum(axis=0)
-        .cumsum(axis=1)
-        .astype("float32")
+    zlatlon[:, :, a:b] = olatlon = (
+        olatlon.cumsum(axis=0).cumsum(axis=1).astype("float32")
     )
-
-    idx_3 = idx_2 + ctime
-    olatlonw = (
-        data[:, :, idx_2:idx_3]
-        .cumsum(axis=0)
-        .cumsum(axis=1)
-        .astype("float32")
+    zlatlonw[:, :, a:b] = olatlonw = (
+        olatlonw.cumsum(axis=0).cumsum(axis=1).astype("float32")
     )
-    
-    idx_4 = idx_3 + (clat * clon)
-    otime = data[:, :, idx_3:idx_4] 
-    otime = otime.reshape(nlon, -1)
-    # otime_new = np.empty((nlat, nlon))
-    '''
-    row_i = 0
-    for chunk_i in range(num_chunks):
-        if chunk_i % 2 == 0:
-            otime_new[row_i:row_i+clat, :nlat] = otime[chunk_i*clat:chunk_i*clat+clat, :nlat]
-        else: 
-            otime_new[row_i:row_i+clat, nlat:nlon] = otime[chunk_i*clat:chunk_i*clat+clat, :nlat] 
-            row_i += clat
-    '''
-    print(otime_new.shape)
-    otimetemp = otime_new.reshape(nlat, nlon, 1)
+    ztimetemp[:, :, idx_acc_time : idx_acc_time + 1] = otime.reshape(nlat, nlon, 1)
+    ztimetempw[:, :, idx_acc_time : idx_acc_time + 1] = otimew.reshape(nlat, nlon, 1)
 
-    idx_5 = idx_4 + (nlat * nlon)
-    otimew = data[:, :, idx_4:idx_5]
-    otimew = otimew.reshape(nlon, -1)
-    otimew_new = np.empty((nlat, nlon))
-    row_i = 0
-    for chunk_i in range(num_chunks):
-        if chunk_i % 2 == 0:
-            otimew_new[row_i:row_i+clat, :nlat] = otimew[chunk_i*clat:chunk_i*clat+clat, :nlat]
-        else: 
-            otimew_new[row_i:row_i+clat, nlat:nlon] = otimew[chunk_i*clat:chunk_i*clat+clat, :nlat]
-            row_i += clat
-    otimetempw = otimew_new.reshape(nlat, nlon, 1)
-
-    # save to zarr
-    zlat[:, a:b, :] = olat
-    zlon[:, a:b, :] = olon
-    zlatlon[:, :, a:b] = olatlon
-    zlatlonw[:, :, a:b] = olatlonw 
-    ztimetemp[:, :, idx_acc_time : idx_acc_time + 1] = otimetemp
-    ztimetempw[:, :, idx_acc_time : idx_acc_time + 1] = otimetempw 
     return
 
 
@@ -193,7 +178,7 @@ def f_time(dz, dzw, ztime, ztimew, calat_in_time, natime, catime, nlon, a, b):
 if __name__ == "__main__":
     start = time.time()
 
-    test_mode = True
+    test_mode = False
     if test_mode:
         from codec_filter_small import DeltaLat, DeltaLon, DeltaTime
 
@@ -227,7 +212,7 @@ if __name__ == "__main__":
     dd = da.from_array(z.astype("f8"), (clat, clon, ctime))
 
     # HACK
-    ntime = ntime  
+    ntime = ntime
     print("nlat/nlon/ntime: ", nlat, nlon, ntime)
     print("clat/clon/ctime: ", clat, clon, ctime)
 
@@ -244,6 +229,7 @@ if __name__ == "__main__":
     natime = int(ntime / ctime)
     nalat = int(nlat / clat)
     nalon = int(nlon / clon)
+    print("natime/nalat/nalon: ", natime, nalat, nalon)
     zlat = (
         root.create_dataset(
             "lat",
@@ -340,13 +326,13 @@ if __name__ == "__main__":
     batch_size = 100
     (natime_start, natime_end) = (0, natime)
     # (natime_start, natime_end) = (int(330000/200), natime)
-    for batch_start in range(natime_start, natime_end, batch_size): 
+    for batch_start in range(natime_start, natime_end, batch_size):
         print("Batch: ", batch_start)
 
         pp = []
         batch_end = min(batch_start + batch_size, natime_end)
         for i in range(batch_start, batch_end):
-            print("Range: ", i * ctime, (i + 1) * ctime) 
+            print("Range: ", i * ctime, (i + 1) * ctime)
 
             p = Process(
                 target=f_latlon_ptime,
@@ -435,4 +421,3 @@ if __name__ == "__main__":
     for p in pp:
         p.join()
     print("assemble time took: ", time.time() - start)
-
