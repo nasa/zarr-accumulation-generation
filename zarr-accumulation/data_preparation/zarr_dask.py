@@ -60,10 +60,16 @@ def compute_block_sum(
 
     # olat[ilon1:ilon2, itime1:itime2] = olat_sm # doesn't work due to duplicate indices
     # So using chunk-location
+    '''
     olat[ci1, ci2, :] = olat_sm.reshape(1, 1, -1)
     olon[ci1, ci2, :] = olon_sm.reshape(1, 1, -1)
     olatlon[ci1, ci2, :] = olatlon_sm.reshape(1, 1, -1)
     olatlonw[ci1, ci2, :] = olatlon_wt.reshape(1, 1, -1)
+    '''
+    olat[ci1, ilon1:ilon2, :] = olat_sm
+    olon[ilat1:ilat2, ci2, :] = olon_sm
+    olatlon[ci1, ci2, :] = olatlon_sm
+    olatlonw[ci1, ci2, :] = olatlon_wt
 
     # These dimensions can use array-location
     otime[ilat1:ilat2, ilon1:ilon2] = otime_sm
@@ -101,8 +107,12 @@ def f_latlon_ptime(
     nalon = int(nlon / clon)
 
     # initialize output arrays
+    '''
     olat = np.empty((nalat, nalon, clon * ctime))  # 2, 2, 14400
     olon = np.empty((nalat, nalon, clat * ctime))
+    '''
+    olat = np.empty((nalat, nlon, ctime))
+    olon = np.empty((nlat, nalon, ctime))
     olatlon = np.empty((nalat, nalon, ctime))
     olatlonw = np.empty((nalat, nalon, ctime))
     otime = np.empty((nlat, nlon))
@@ -131,16 +141,15 @@ def f_latlon_ptime(
 
     # save to zarr
     zlat[:, a:b, :] = (
-        olat.reshape((nalat, nlon, -1))
+        olat
         .cumsum(axis=0)
         .transpose((0, 2, 1))
         .astype("float32")
     )
-    zlon[:, a:b, :] = olon = (
-        olon.transpose((1, 0, 2))
-        .reshape((nalon, nlat, -1))
-        .cumsum(axis=0)
-        .transpose((0, 2, 1))
+    zlon[:, a:b, :] = (
+        olon
+        .cumsum(axis=1)
+        .transpose((1, 2, 0))
         .astype("float32")
     )
     zlatlon[:, :, a:b] = olatlon = (
