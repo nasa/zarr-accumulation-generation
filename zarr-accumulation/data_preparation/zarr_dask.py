@@ -19,19 +19,15 @@ compressor = Blosc(cname="zstd", clevel=5, shuffle=Blosc.SHUFFLE)
 s3 = s3fs.S3FileSystem()
 
 
-def compute_block_sum(block, block_info=None, ot=None, otw=None, wd=None, axis=0):
+def compute_block_sum(block, block_info=None, wd=None, axis=0):
     if not block_info:
         return block
-
-    [(ilat1, ilat2), (ilon1, ilon2), _] = block_info[0]["array-location"]
-
     (s0, s1, s2) = block.shape
     (i1, i2) = block_info[0]["array-location"][0]
     mask = block >= 0
     w = mask * (wd[i1:i2].reshape(s0, 1, 1))
     ow = block * w
 
-    # Note: Skipping latw and lonw for now
     olat_sm = ow.sum(axis=0)
     olon_sm = ow.sum(axis=1)
     olatlon_sm = olat_sm.sum(axis=0)
@@ -39,15 +35,14 @@ def compute_block_sum(block, block_info=None, ot=None, otw=None, wd=None, axis=0
     otime_sm = ow.sum(axis=2)
     otime_wt = w.sum(axis=2)
 
-    ot[ilat1:ilat2, ilon1:ilon2] = otime_sm
-    otw[ilat1:ilat2, ilon1:ilon2] = otime_wt
-
     output = np.concatenate(
         (
             olat_sm.flatten(),
             olon_sm.flatten(),
             olatlon_sm.flatten(),
             olatlon_wt.flatten(),
+            otime_sm.flatten(),
+            otime_wt.flatten(),
         )
     )
     output = output.reshape(1, 1, len(output))
@@ -79,27 +74,18 @@ def f_latlon_ptime(
 
     # some locals
     idx_acc_time = int(a / ctime)
+
     nalat = int(nlat / clat)
     nalon = int(nlon / clon)
     num_chunks = nalat * nalon
-
-    otime_new = np.empty((nlat, nlon))
-    otimew_new = np.empty((nlat, nlon))
 
     # compute
     t0 = time.time()
     data = (
         dd[:, :, a:b]
-        .map_blocks(
-            compute_block_sum,
-            ot=otime_new,
-            otw=otimew_new,
-            wd=wd,
-            chunks=(clat, clon, ctime),
-        )
+        .map_blocks(compute_block_sum, wd=wd, chunks=(clat, clon, ctime))
         .compute()
     )
-
     print("compute used: ", time.time() - t0)
     t0 = time.time()
 
@@ -129,7 +115,23 @@ def f_latlon_ptime(
     idx_3 = idx_2 + ctime
     olatlonw = data[:, :, idx_2:idx_3].cumsum(axis=0).cumsum(axis=1).astype("float32")
 
+    # Clean up formatting later
+    idx_4 = idx_3 + (clat * clon)
+    otime = data[:, :, idx_3:idx_4]
+    otime = otime.transpose((0, 2, 1))
+    otime = otime.reshape(nlat, nlon)
+    odd_cols = otime[:, 1::2]
+    even_cols = otime[:, 0::2]
+    otime_new = np.concatenate((even_cols, odd_cols), axis=1)
     otimetemp = otime_new.reshape(nlat, nlon, 1)
+
+    idx_5 = idx_4 + (nlat * nlon)
+    otimew = data[:, :, idx_4:idx_5]
+    otimew = otimew.transpose((0, 2, 1))
+    otimew = otimew.reshape(nlat, nlon)
+    odd_colsw = otimew[:, 1::2]
+    even_colsw = otimew[:, 0::2]
+    otimew_new = np.concatenate((even_colsw, odd_colsw), axis=1)
     otimetempw = otimew_new.reshape(nlat, nlon, 1)
 
     # save to zarr
@@ -139,6 +141,8 @@ def f_latlon_ptime(
     zlatlonw[:, :, a:b] = olatlonw
     ztimetemp[:, :, idx_acc_time : idx_acc_time + 1] = otimetemp
     ztimetempw[:, :, idx_acc_time : idx_acc_time + 1] = otimetempw
+
+    print("save used: ", time.time() - t0)
     return
 
 
@@ -309,28 +313,15 @@ if __name__ == "__main__":
 
     # Compute
     # i=0; f_latlon_ptime(dd, zlat, zlatw, zlon, zlonw, zlatlon, zlatlonw, ztimetemp, ztimetempw, nlat, nlon, ntime, clat, clon, ctime, nalat, nalon, wd, i*ctime, (i+1)*ctime,); exit(0)
-    # i = 0
-    # import timeit
-    # A = i * ctime
-    # B = (i + 1) * ctime
-    # t = timeit.Timer(
-    #     "f_latlon_ptime(dd, zlat, zlatw, zlon, zlonw, zlatlon, zlatlonw, ztimetemp, ztimetempw, nlat, nlon, ntime, clat, clon, ctime, nalat, nalon, wd, A, B)",
-    #     setup="from __main__ import f_latlon_ptime, dd, zlat, zlatw, zlon, zlonw, zlatlon, zlatlonw, ztimetemp, ztimetempw, nlat, nlon, ntime, clat, clon, ctime, nalat, nalon, wd, A, B",
-    # )
-    # print("timeit.repeat result: ", t.repeat(number=1, repeat=10))
-    # exit(0)
-
     batch_size = 100
     (natime_start, natime_end) = (0, natime)
     # (natime_start, natime_end) = (int(330000/200), natime)
     for batch_start in range(natime_start, natime_end, batch_size):
         print("Batch: ", batch_start)
-
         pp = []
         batch_end = min(batch_start + batch_size, natime_end)
         for i in range(batch_start, batch_end):
             print("Range: ", i * ctime, (i + 1) * ctime)
-
             p = Process(
                 target=f_latlon_ptime,
                 args=(
@@ -418,4 +409,3 @@ if __name__ == "__main__":
     for p in pp:
         p.join()
     print("assemble time took: ", time.time() - start)
-
