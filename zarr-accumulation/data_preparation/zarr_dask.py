@@ -118,21 +118,29 @@ def f_latlon_ptime(
     # Clean up formatting later
     idx_4 = idx_3 + (clat * clon)
     otime = data[:, :, idx_3:idx_4]
-    otime = otime.transpose((0, 2, 1))
-    otime = otime.reshape(nlat, nlon)
-    odd_cols = otime[:, 1::2]
-    even_cols = otime[:, 0::2]
-    otime_new = np.concatenate((even_cols, odd_cols), axis=1)
-    otimetemp = otime_new.reshape(nlat, nlon, 1)
+    otimetemp = []
+    for ilat in range(nalat):
+        yy = []
+        for ilon in range(nalon):
+            xx = otime[ilat, (ilon) : ((ilon + 1)), :]
+            xx = xx.reshape(clat, clon)
+            yy.append(xx)
+        yy_concat = np.concatenate(yy, axis=1)
+        otimetemp.append(yy_concat)
+    otimetemp = np.concatenate(otimetemp, axis=0).reshape(nlat, nlon, 1)
 
     idx_5 = idx_4 + (nlat * nlon)
     otimew = data[:, :, idx_4:idx_5]
-    otimew = otimew.transpose((0, 2, 1))
-    otimew = otimew.reshape(nlat, nlon)
-    odd_colsw = otimew[:, 1::2]
-    even_colsw = otimew[:, 0::2]
-    otimew_new = np.concatenate((even_colsw, odd_colsw), axis=1)
-    otimetempw = otimew_new.reshape(nlat, nlon, 1)
+    otimetempw = []
+    for ilat in range(nalat):
+        yy_w = []
+        for ilon in range(nalon):
+            xx_w = otimew[ilat, (ilon) : ((ilon + 1)), :]
+            xx_w = xx_w.reshape(clat, clon)
+            yy_w.append(xx_w)
+        yy_concat_w = np.concatenate(yy_w, axis=1)
+        otimetempw.append(yy_concat_w)
+    otimetempw = np.concatenate(otimetempw, axis=0).reshape(nlat, nlon, 1)
 
     # save to zarr
     zlat[:, a:b, :] = olat
@@ -220,6 +228,7 @@ if __name__ == "__main__":
     natime = int(ntime / ctime)
     nalat = int(nlat / clat)
     nalon = int(nlon / clon)
+    print("nalat/nalon/natime", nalat, nalon, natime)
     zlat = (
         root.create_dataset(
             "lat",
