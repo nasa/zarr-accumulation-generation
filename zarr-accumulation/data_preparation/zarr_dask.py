@@ -71,7 +71,6 @@ def f_latlon_ptime(
     a,
     b,
 ):
-
     # some locals
     idx_acc_time = int(a / ctime)
 
@@ -116,10 +115,20 @@ def f_latlon_ptime(
     olatlonw = data[:, :, idx_2:idx_3].cumsum(axis=0).cumsum(axis=1).astype("float32")
 
     idx_4 = idx_3 + (clat * clon)
-    otimetemp = data[:, :, idx_3:idx_4].reshape((nalat, nalon, clat, clon)).transpose((0,2,1,3)).reshape((nlat, nlon, 1))
+    otimetemp = (
+        data[:, :, idx_3:idx_4]
+        .reshape((nalat, nalon, clat, clon))
+        .transpose((0, 2, 1, 3))
+        .reshape((nlat, nlon, 1))
+    )
 
     idx_5 = idx_4 + (nlat * nlon)
-    otimetempw = data[:, :, idx_4:idx_5].reshape((nalat, nalon, clat, clon)).transpose((0,2,1,3)).reshape((nlat, nlon, 1))
+    otimetempw = (
+        data[:, :, idx_4:idx_5]
+        .reshape((nalat, nalon, clat, clon))
+        .transpose((0, 2, 1, 3))
+        .reshape((nlat, nlon, 1))
+    )
 
     # save to zarr
     zlat[:, a:b, :] = olat
