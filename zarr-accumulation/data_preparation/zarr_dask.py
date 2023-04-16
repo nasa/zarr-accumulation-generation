@@ -115,32 +115,11 @@ def f_latlon_ptime(
     idx_3 = idx_2 + ctime
     olatlonw = data[:, :, idx_2:idx_3].cumsum(axis=0).cumsum(axis=1).astype("float32")
 
-    # Clean up formatting later
     idx_4 = idx_3 + (clat * clon)
-    otime = data[:, :, idx_3:idx_4]
-    otimetemp = []
-    for ilat in range(nalat):
-        yy = []
-        for ilon in range(nalon):
-            xx = otime[ilat, (ilon) : ((ilon + 1)), :]
-            xx = xx.reshape(clat, clon)
-            yy.append(xx)
-        yy_concat = np.concatenate(yy, axis=1)
-        otimetemp.append(yy_concat)
-    otimetemp = np.concatenate(otimetemp, axis=0).reshape(nlat, nlon, 1)
+    otimetemp = data[:, :, idx_3:idx_4].reshape((nalat, nalon, clat, clon)).transpose((0,2,1,3)).reshape((nlat, nlon, 1))
 
     idx_5 = idx_4 + (nlat * nlon)
-    otimew = data[:, :, idx_4:idx_5]
-    otimetempw = []
-    for ilat in range(nalat):
-        yy_w = []
-        for ilon in range(nalon):
-            xx_w = otimew[ilat, (ilon) : ((ilon + 1)), :]
-            xx_w = xx_w.reshape(clat, clon)
-            yy_w.append(xx_w)
-        yy_concat_w = np.concatenate(yy_w, axis=1)
-        otimetempw.append(yy_concat_w)
-    otimetempw = np.concatenate(otimetempw, axis=0).reshape(nlat, nlon, 1)
+    otimetempw = data[:, :, idx_4:idx_5].reshape((nalat, nalon, clat, clon)).transpose((0,2,1,3)).reshape((nlat, nlon, 1))
 
     # save to zarr
     zlat[:, a:b, :] = olat
