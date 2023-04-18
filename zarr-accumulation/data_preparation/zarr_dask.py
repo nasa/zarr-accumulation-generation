@@ -92,7 +92,7 @@ def f_latlon_ptime(
     idx_0 = clon * ctime
     olat = (
         data[:, :, :idx_0]
-        .reshape((nalat, nlon, -1))
+        .reshape((nalat, nlon, ctime))
         .cumsum(axis=0)
         .transpose((0, 2, 1))
         .astype("float32")
@@ -102,7 +102,7 @@ def f_latlon_ptime(
     olon = (
         data[:, :, idx_0:idx_1]
         .transpose((1, 0, 2))
-        .reshape((nalon, nlat, -1))
+        .reshape((nalon, nlat, ctime))
         .cumsum(axis=0)
         .transpose((0, 2, 1))
         .astype("float32")
