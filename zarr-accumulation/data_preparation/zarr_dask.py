@@ -119,7 +119,7 @@ def f_latlon_ptime(
         data[:, :, idx_3:idx_4]
         .reshape((nalat, nalon, clat, clon))
         .transpose((0, 2, 1, 3))
-        .reshape((nlat, nlon, 1))
+        .reshape((nlat, nlon))
     )
 
     idx_5 = idx_4 + (nlat * nlon)
@@ -127,7 +127,7 @@ def f_latlon_ptime(
         data[:, :, idx_4:idx_5]
         .reshape((nalat, nalon, clat, clon))
         .transpose((0, 2, 1, 3))
-        .reshape((nlat, nlon, 1))
+        .reshape((nlat, nlon))
     )
 
     # save to zarr
@@ -135,8 +135,8 @@ def f_latlon_ptime(
     zlon[:, a:b, :] = olon
     zlatlon[:, :, a:b] = olatlon
     zlatlonw[:, :, a:b] = olatlonw
-    ztimetemp[:, :, idx_acc_time : idx_acc_time + 1] = otimetemp
-    ztimetempw[:, :, idx_acc_time : idx_acc_time + 1] = otimetempw
+    ztimetemp[:, :, idx_acc_time] = otimetemp
+    ztimetempw[:, :, idx_acc_time] = otimetempw
 
     print("save used: ", time.time() - t0)
     return
