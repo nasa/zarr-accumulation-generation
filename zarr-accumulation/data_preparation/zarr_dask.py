@@ -76,7 +76,6 @@ def f_latlon_ptime(
 
     nalat = int(nlat / clat)
     nalon = int(nlon / clon)
-    num_chunks = nalat * nalon
 
     # compute
     t0 = time.time()
