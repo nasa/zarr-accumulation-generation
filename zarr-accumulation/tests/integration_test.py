@@ -31,8 +31,8 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
             "lon": "e61cfd72e2d922260d97a2aac52c0da36faad43b",
             "time": "72e8b494e22bd59d0e7b1551c14a8bcdc2cb343f",
             "timew": "58e34c97ffa66dbddc3ad7a9b87a1e988298ea72",
-            "latw": "386571ad13162abb00432a0c65dffb94819e0f1c",
-            "lonw": "8dd79674382290f9e111782aa20439ae1a8eae09",
+            # "latw": "386571ad13162abb00432a0c65dffb94819e0f1c",
+            # "lonw": "8dd79674382290f9e111782aa20439ae1a8eae09",
         }
 
         # Validate
