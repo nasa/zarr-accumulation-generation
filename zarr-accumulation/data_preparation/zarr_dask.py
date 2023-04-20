@@ -29,7 +29,9 @@ def compute_block_sum(block, block_info=None, wd=None, axis=0):
     ow = block * w
 
     olat_sm = ow.sum(axis=0)
+    olat_wt = w.sum(axis=0)
     olon_sm = ow.sum(axis=1)
+    olon_wt = w.sum(axis=1)
     olatlon_sm = olat_sm.sum(axis=0)
     olatlon_wt = w.sum(axis=(0, 1))
     otime_sm = ow.sum(axis=2)
@@ -38,7 +40,9 @@ def compute_block_sum(block, block_info=None, wd=None, axis=0):
     output = np.concatenate(
         (
             olat_sm.flatten(),
+            olat_wt.flatten(),
             olon_sm.flatten(),
+            olon_wt.flatten(),
             olatlon_sm.flatten(),
             olatlon_wt.flatten(),
             otime_sm.flatten(),
@@ -73,7 +77,6 @@ def f_latlon_ptime(
 ):
     # some locals
     idx_acc_time = int(a / ctime)
-
     nalat = int(nlat / clat)
     nalon = int(nlon / clon)
 
@@ -97,9 +100,18 @@ def f_latlon_ptime(
         .astype("float32")
     )
 
-    idx_1 = idx_0 + (clat * ctime)
-    olon = (
+    idx_1 = idx_0 + (clon * ctime)
+    olatw = (
         data[:, :, idx_0:idx_1]
+        .reshape((nalat, nlon, ctime))
+        .cumsum(axis=0)
+        .transpose((0, 2, 1))
+        .astype("float32")
+    )
+
+    idx_2 = idx_1 + (clat * ctime)
+    olon = (
+        data[:, :, idx_1:idx_2]
         .transpose((1, 0, 2))
         .reshape((nalon, nlat, ctime))
         .cumsum(axis=0)
@@ -107,23 +119,33 @@ def f_latlon_ptime(
         .astype("float32")
     )
 
-    idx_2 = idx_1 + ctime
-    olatlon = data[:, :, idx_1:idx_2].cumsum(axis=0).cumsum(axis=1).astype("float32")
+    idx_3 = idx_2 + (clat * ctime)
+    olonw = (
+        data[:, :, idx_2:idx_3]
+        .transpose((1, 0, 2))
+        .reshape((nalon, nlat, ctime))
+        .cumsum(axis=0)
+        .transpose((0, 2, 1))
+        .astype("float32")
+    )
 
-    idx_3 = idx_2 + ctime
-    olatlonw = data[:, :, idx_2:idx_3].cumsum(axis=0).cumsum(axis=1).astype("float32")
+    idx_4 = idx_3 + ctime
+    olatlon = data[:, :, idx_3:idx_4].cumsum(axis=0).cumsum(axis=1).astype("float32")
 
-    idx_4 = idx_3 + (clat * clon)
+    idx_5 = idx_4 + ctime
+    olatlonw = data[:, :, idx_4:idx_5].cumsum(axis=0).cumsum(axis=1).astype("float32")
+
+    idx_6 = idx_5 + (clat * clon)
     otimetemp = (
-        data[:, :, idx_3:idx_4]
+        data[:, :, idx_5:idx_6]
         .reshape((nalat, nalon, clat, clon))
         .transpose((0, 2, 1, 3))
         .reshape((nlat, nlon))
     )
 
-    idx_5 = idx_4 + (nlat * nlon)
+    idx_7 = idx_6 + (nlat * nlon)
     otimetempw = (
-        data[:, :, idx_4:idx_5]
+        data[:, :, idx_6:idx_7]
         .reshape((nalat, nalon, clat, clon))
         .transpose((0, 2, 1, 3))
         .reshape((nlat, nlon))
@@ -131,7 +153,9 @@ def f_latlon_ptime(
 
     # save to zarr
     zlat[:, a:b, :] = olat
+    zlatw[:, a:b, :] = olatw
     zlon[:, a:b, :] = olon
+    zlonw[:, a:b, :] = olonw
     zlatlon[:, :, a:b] = olatlon
     zlatlonw[:, :, a:b] = olatlonw
     ztimetemp[:, :, idx_acc_time] = otimetemp
@@ -234,7 +258,7 @@ if __name__ == "__main__":
             shape=(nalat, ntime, nlon),
             chunks=(nalat, ctime, clon),
             compressor=compressor,
-            dtype="|S9",
+            dtype="f4",
         )
         if "latw" not in root
         else root.latw
@@ -257,7 +281,7 @@ if __name__ == "__main__":
             shape=(nalon, ntime, nlat),
             chunks=(nalon, ctime, clat),
             compressor=compressor,
-            dtype="|S18",
+            dtype="f4",
         )
         if "lonw" not in root
         else root.lonw
@@ -309,6 +333,7 @@ if __name__ == "__main__":
 
     # Compute
     # i=0; f_latlon_ptime(dd, zlat, zlatw, zlon, zlonw, zlatlon, zlatlonw, ztimetemp, ztimetempw, nlat, nlon, ntime, clat, clon, ctime, nalat, nalon, wd, i*ctime, (i+1)*ctime,); exit(0)
+
     batch_size = 100
     (natime_start, natime_end) = (0, natime)
     # (natime_start, natime_end) = (int(330000/200), natime)
