@@ -12,11 +12,7 @@ from codec_filter_small import (
 
 if __name__ == "__main__":
     store_path = os.path.join(
-        os.getcwd(),
-        "..",
-        "data_preparation",
-        "data",
-        "test_out",
+        os.getcwd(), "..", "data_preparation", "data", "test_out",
     )
 
     true_store = zarr.DirectoryStore(store_path)
@@ -24,13 +20,13 @@ if __name__ == "__main__":
 
     dimension_stats_dict = {
         "lat": None,
+        "latw": None,
+        "lon": None,
+        "lonw": None,
         "latlon": None,
         "latlonw": None,
-        "lon": None,
         "time": None,
         "timew": None,
-        "latw": None,
-        "lonw": None,
     }
 
     for key, val in dimension_stats_dict.items():
