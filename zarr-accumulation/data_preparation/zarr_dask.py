@@ -1,28 +1,21 @@
 import time
-import math
-import base64
 import s3fs
-from codec_filter import DeltaLat, DeltaLon, DeltaTime
-import copy
-import sys
 import zarr
-import dask
-from dask import compute
-import dask.array as da
-from multiprocessing import Process
-from threading import Thread
-from threading import Thread
-from numcodecs import Blosc, Delta
 import numpy as np
+import dask.array as da
+from dask import compute
+from numcodecs import Blosc
+from multiprocessing import Process
+from codec_filter import DeltaLat, DeltaLon, DeltaTime
 
 compressor = Blosc(cname="zstd", clevel=5, shuffle=Blosc.SHUFFLE)
 s3 = s3fs.S3FileSystem()
 
 
-def compute_block_sum(block, block_info=None, wd=None, axis=0):
+def compute_block_sum(block, block_info=None, wd=None):
     if not block_info:
         return block
-    (s0, s1, s2) = block.shape
+    (s0, _, _) = block.shape
     (i1, i2) = block_info[0]["array-location"][0]
     mask = block >= 0
     w = mask * (wd[i1:i2].reshape(s0, 1, 1))
@@ -65,7 +58,6 @@ def f_latlon_ptime(
     ztimetempw,
     nlat,
     nlon,
-    ntime,
     clat,
     clon,
     ctime,
@@ -185,61 +177,9 @@ def f_time(dz, dzw, ztime, ztimew, calat_in_time, natime, catime, nlon, a, b):
     return
 
 
-if __name__ == "__main__":
-    start = time.time()
-
-    test_mode = True
-    if test_mode:
-        from codec_filter_small import DeltaLat, DeltaLon, DeltaTime
-
-        # Locals
-        store_output = zarr.DirectoryStore("data/test_out")
-
-        # Generate random data
-        np.random.seed(0)
-        chunks = (36, 72, 100)
-        z = np.random.rand(144, 288, 200)
-        z[z < 0.2] = -99
-        (nlat, nlon, ntime) = z.shape
-        (clat, clon, ctime) = chunks
-    else:
-        # Locals
-        store_input = zarr.DirectoryStore("data/GPM_3IMERGHH_06_precipitationCal")
-        store_output = zarr.DirectoryStore("data/GPM_3IMERGHH_06_precipitationCal_out")
-
-        # Read zarr
-        z = zarr.open(store_input, mode="r")["variable"]
-        shape = z.shape
-        chunks = z.chunks
-        (nlat, nlon, ntime) = shape
-        (clat, clon, ctime) = chunks
-
-    root = zarr.open(store_output, mode="w")
-    root_local = root
-
-    clat *= 2  # NOTE coarse
-    clon *= 2  # NOTE coarse
-    dd = da.from_array(z.astype("f8"), (clat, clon, ctime))
-
-    # HACK
-    ntime = ntime
-    print("nlat/nlon/ntime: ", nlat, nlon, ntime)
-    print("clat/clon/ctime: ", clat, clon, ctime)
-
-    # Weight array (1D)
-    weight = np.cos(np.deg2rad([np.arange(-89.95, 90, 0.1)]))[:, :nlat].reshape(
-        nlat, 1, 1
-    )
-    wd = da.from_array(weight)
-    # dd *= wd
-    print("read zarr took: ", time.time() - start)
-    start = time.time()
-
-    # Create time acc zarr
-    natime = int(ntime / ctime)
-    nalat = int(nlat / clat)
-    nalon = int(nlon / clon)
-    print("nalat/nalon/natime", nalat, nalon, natime)
+def create_zarr_arrays(
+    root, nlat, nlon, ntime, clat, clon, ctime, nalat, nalon, natime
+):
     zlat = (
         root.create_dataset(
             "lat",
@@ -330,13 +270,32 @@ if __name__ == "__main__":
         if "time_tempw" not in root_local
         else root_local.time_tempw
     )
+    return (zlat, zlatw, zlon, zlonw, zlatlon, zlatlonw, ztimetemp, ztimetempw)
 
-    # Compute
-    # i=0; f_latlon_ptime(dd, zlat, zlatw, zlon, zlonw, zlatlon, zlatlonw, ztimetemp, ztimetempw, nlat, nlon, ntime, clat, clon, ctime, nalat, nalon, wd, i*ctime, (i+1)*ctime,); exit(0)
 
+def run_compute(
+    start,
+    dd,
+    zlat,
+    zlatw,
+    zlon,
+    zlonw,
+    zlatlon,
+    zlatlonw,
+    ztimetemp,
+    ztimetempw,
+    nlat,
+    nlon,
+    clat,
+    clon,
+    ctime,
+    nalat,
+    nalon,
+    natime,
+    wd,
+):
     batch_size = 100
     (natime_start, natime_end) = (0, natime)
-    # (natime_start, natime_end) = (int(330000/200), natime)
     for batch_start in range(natime_start, natime_end, batch_size):
         print("Batch: ", batch_start)
         pp = []
@@ -357,7 +316,6 @@ if __name__ == "__main__":
                     ztimetempw,
                     nlat,
                     nlon,
-                    ntime,
                     clat,
                     clon,
                     ctime,
@@ -368,15 +326,17 @@ if __name__ == "__main__":
                     (i + 1) * ctime,
                 ),
             )
-            # p = Thread(target=f_latlon_ptime, args=(dd, zlat, zlatw, zlon, zlonw, zlatlon, zlatlonw, ztimetemp, ztimetempw, nlat, nlon, ntime, clat, clon, ctime, nalat, nalon, wd, i*ctime, (i+1)*ctime,))
             p.start()
             pp.append(p)
         for p in pp:
             p.join()
         print("compute lat/lon (partial time) took: ", time.time() - start)
-        start = time.time()
+    return
 
-    # Assemble time acc
+
+def assemble_time_array(
+    start, ztimetemp, ztimetempw, nlat, nlon, clat, ctime, natime,
+):
     natime_final = int(natime / 2)
     catime = ctime
     calat_in_time = int(clat / 9)
@@ -430,3 +390,98 @@ if __name__ == "__main__":
     for p in pp:
         p.join()
     print("assemble time took: ", time.time() - start)
+    return
+
+
+if __name__ == "__main__":
+    start = time.time()
+
+    test_mode = True
+    if test_mode:
+        from codec_filter_small import DeltaLat, DeltaLon, DeltaTime
+
+        # Locals
+        store_output = zarr.DirectoryStore("data/test_out")
+
+        # Generate random data
+        np.random.seed(0)
+        chunks = (36, 72, 100)
+        z = np.random.rand(144, 288, 200)
+        z[z < 0.2] = -99
+        (nlat, nlon, ntime) = z.shape
+        (clat, clon, ctime) = chunks
+    else:
+        # Locals
+        store_input = zarr.DirectoryStore("data/GPM_3IMERGHH_06_precipitationCal")
+        store_output = zarr.DirectoryStore("data/GPM_3IMERGHH_06_precipitationCal_out")
+
+        # Read zarr
+        z = zarr.open(store_input, mode="r")["variable"]
+        shape = z.shape
+        chunks = z.chunks
+        (nlat, nlon, ntime) = shape
+        (clat, clon, ctime) = chunks
+
+    root = zarr.open(store_output, mode="w")
+    root_local = root
+
+    clat *= 2  # NOTE coarse
+    clon *= 2  # NOTE coarse
+    dd = da.from_array(z.astype("f8"), (clat, clon, ctime))
+
+    # HACK
+    ntime = ntime
+    print("nlat/nlon/ntime: ", nlat, nlon, ntime)
+    print("clat/clon/ctime: ", clat, clon, ctime)
+
+    # Weight array (1D)
+    weight = np.cos(np.deg2rad([np.arange(-89.95, 90, 0.1)]))[:, :nlat].reshape(
+        nlat, 1, 1
+    )
+    wd = da.from_array(weight)
+    print("read zarr took: ", time.time() - start)
+    start = time.time()
+
+    # Create time acc zarr
+    natime = int(ntime / ctime)
+    nalat = int(nlat / clat)
+    nalon = int(nlon / clon)
+    print("nalat/nalon/natime", nalat, nalon, natime)
+
+    (
+        zlat,
+        zlatw,
+        zlon,
+        zlonw,
+        zlatlon,
+        zlatlonw,
+        ztimetemp,
+        ztimetempw,
+    ) = create_zarr_arrays(
+        root, nlat, nlon, ntime, clat, clon, ctime, nalat, nalon, natime
+    )
+
+    run_compute(
+        start,
+        dd,
+        zlat,
+        zlatw,
+        zlon,
+        zlonw,
+        zlatlon,
+        zlatlonw,
+        ztimetemp,
+        ztimetempw,
+        nlat,
+        nlon,
+        clat,
+        clon,
+        ctime,
+        nalat,
+        nalon,
+        natime,
+        wd,
+    )
+    start = time.time()
+
+    assemble_time_array(start, ztimetemp, ztimetempw, nlat, nlon, clat, ctime, natime)
