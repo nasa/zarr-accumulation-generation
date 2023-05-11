@@ -28,7 +28,8 @@ def compute_block_sum(
     # print(s0, i1, i2)
     # mask = block >= 0
     # weights = mask * (weight_dask[i1:i2].reshape(s0, 1, 1))
-    # output_weighted = block * weights
+    # block_weighted = block * weights
+    # block = block_weighted
 
     # Trying with just unweighted block first
     outputs = []
@@ -113,9 +114,12 @@ def run_compute_write_zarr(
                     batch_idx_end - batch_idx_start,
                 )
             )
+
         # Loop over indices and perform cumsum in each dim
         for i in range(len(dim_idx)):
-            result.cumsum(axis=dim_idx[i])
+            # result.cumsum(axis=dim_idx[i]) -> wrong
+            # print("i:", i)
+            result = result.cumsum(axis=i)
         print("result.shape", result.shape)
 
         # Save result to Zarr
@@ -128,7 +132,6 @@ def run_compute_write_zarr(
 
         print("\n")
 
-    exit()
     return
 
 
@@ -315,6 +318,17 @@ if __name__ == "__main__":
     variable_array_dask = da.from_array(
         variable_array.astype("f8"), variable_array_chunks
     )
+
+    ##########
+    # import copy
+
+    # # Make weighted variable array
+    # weight_dim_idx = 0
+    # weight_dim = idx_to_dim[weight_dim_idx]  # latitude
+    # x = copy.deepcopy(variable_array_dask) >= 0
+    # weighted_array =
+    # print(x)
+    # exit()
 
     # Compute
     # How to generalize the batches - pick an arbitrary dimension to use?
