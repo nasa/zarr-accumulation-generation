@@ -18,34 +18,28 @@ s3 = s3fs.S3FileSystem()
 def compute_block_sum(
     block, accumulation_dimensions, block_info=None, weight_dask=None
 ):
-    # print("block_info", block_info)
     if not block_info:
         return block
 
-    # Need to generalize this weighing - compute the weights outside of this function
-    # (s0, _, _) = block.shape
-    # (i1, i2) = block_info[0]["array-location"][0]
-    # print(s0, i1, i2)
-    # mask = block >= 0
-    # weights = mask * (weight_dask[i1:i2].reshape(s0, 1, 1))
-    # block_weighted = block * weights
-    # block = block_weighted
-
-    # Trying with just unweighted block first
+    # Trying with just unweighted block
     outputs = []
     for dim_i, dim_idx in enumerate(accumulation_dimensions):
-        # Skipping time for now
-        if dim_i == 2:
-            continue
         output = block.sum(axis=dim_idx)
         outputs.append(output.flatten())
 
     outputs = np.concatenate(outputs)
-    outputs = outputs.reshape(1, 1, len(outputs))
+
+    # outputs = outputs.reshape(1, 1, len(outputs))
+    # More generic than the above line for variable number of dimensions
+    outputs = outputs.reshape(len(outputs))
+    for i in range(len(block.shape) - 1):
+        outputs = np.expand_dims(outputs, axis=i)
+    # print("outputs.shape", outputs.shape)
+
     return outputs
 
 
-def run_compute_write_zarr(
+def compute_write_zarr(
     acc_group,
     array_shapes,
     array_chunks,
@@ -59,8 +53,10 @@ def run_compute_write_zarr(
     batch_idx_start,
     batch_idx_end,
 ):
+    idx_acc_time = int(batch_idx_start / variable_array_chunks[batch_dim_idx])
+    print("idx_acc_time:", idx_acc_time)
+
     # Compute
-    # Equivalent is np.take() but this function creates a copy of array
     slice_list = [slice(None)] * variable_array_dask.ndim
     slice_list[batch_dim_idx] = slice(batch_idx_start, batch_idx_end)
     # print("slice_list: ", slice_list)
@@ -81,9 +77,6 @@ def run_compute_write_zarr(
     # Extract data
     current_idx = 0
     for dim_i, dim_idx in enumerate(accumulation_dimensions):
-        # Skipping time for now
-        if dim_i == 2:
-            continue
 
         # Get idx of array in flattened outputs
         chunk_indices = np.arange(0, len(block_sums.shape))
@@ -103,65 +96,173 @@ def run_compute_write_zarr(
         # Get sum result and compute cumsum
         result = block_sums[:, :, current_idx:end_idx]
 
-        # Need to generalize this for other dims
-        # Especially latlon - which doesn't need reshaping and will have 2 cumsum operations over 2 dimensions
-        # Also transpose here to .transpose((0, 2, 1)) if figure out how to generalize this
         if len(chunk_indices) > 1:  # Don't reshape for acc_latlon
-            result = result.reshape(
-                (
-                    array_shapes[dim_i][0],
-                    array_shapes[dim_i][1],
-                    batch_idx_end - batch_idx_start,
+            # For dimension we're batching over (e.g., time)
+            if dim_i == batch_dim_idx:
+                result = result.reshape(array_shapes[dim_i][1], array_shapes[dim_i][2])
+            else:
+                result = result.reshape(
+                    (
+                        array_shapes[dim_i][0],
+                        array_shapes[dim_i][1],
+                        batch_idx_end - batch_idx_start,
+                    )
                 )
-            )
 
         # Loop over indices and perform cumsum in each dim
-        for i in range(len(dim_idx)):
-            # result.cumsum(axis=dim_idx[i]) -> wrong
-            # print("i:", i)
-            result = result.cumsum(axis=i)
-        print("result.shape", result.shape)
+        # Skip cumsum for dimension we're batching over (e.g., dim "2" or time)
+        if dim_i == batch_dim_idx:
+            print("Skipping cumsum for batch dimension", batch_dim_idx)
+        else:
+            for i in range(len(dim_idx)):
+                result = result.cumsum(axis=i)
+            print("result.shape", result.shape)
+            # print("result", result)
 
         # Save result to Zarr
-        acc_group[accumulation_names[dim_i]][
-            :, :, batch_idx_start:batch_idx_end
-        ] = result
+        if dim_i == batch_dim_idx:
+            dim_name = accumulation_names[dim_i] + "_temp"
+            acc_group[dim_name][idx_acc_time, :, :] = result
+        else:
+            acc_group[accumulation_names[dim_i]][
+                :, :, batch_idx_start:batch_idx_end
+            ] = result
 
         # Update current_idx in flattened outputs
         current_idx = end_idx
-
         print("\n")
+    return
+
+
+def compute_batch_dimension(
+    batch_array_dask,
+    batch_dataset,
+    batch_dim_stride,
+    new_batch_array_chunks,
+    batch_idx_start,
+    batch_idx_end,
+):
+    # Do cumsum for the batch dimension (e.g., time) and update zarr array
+    # Previously f_time()
+    # The accumulation dimension is right now always the first dimension in the respective array, so axis=0
+    result = (
+        batch_array_dask[:, batch_idx_start:batch_idx_end, :]
+        .cumsum(axis=0)[1::batch_dim_stride, :, :]
+        .rechunk(new_batch_array_chunks)
+        .astype("f4")
+        .compute()
+    )
+    # print("result.shape", result.shape)
+    # print("result", result)
+    batch_dataset[:, batch_idx_start:batch_idx_end, :] = result
+
+    # Operate on weights here
+
+    return
+
+
+def assemble_batch_dimension(
+    batch_dim_idx,
+    accumulation_names,
+    accumulation_weight_names,
+    acc_group,
+    array_shapes,
+    shape,
+    variable_array_chunks,
+):
+    # Pick the first dimension (e.g., lat or 0) to batch over
+    # These are hardcoded for now... make as parameters?
+    batch_dim_idx_2 = 0
+    n_threads = 9
+
+    acc_dim_name = accumulation_names[batch_dim_idx]
+    acc_dim_name_temp = acc_dim_name + "_temp"
+    print(f"Final assembly for dimension: {acc_dim_name}")
+
+    # Always a 1-element tuple e.g., (2,)
+    batch_dim_stride = accumulation_strides[batch_dim_idx][0]
+
+    # Create final dataset and run compute for the batch dimension (e.g., time)
+    num_chunks_final = int(array_shapes[batch_dim_idx][0] / batch_dim_stride)
+    chunk_size = variable_array_chunks[batch_dim_idx]
+    num_batches = int(variable_array_chunks[batch_dim_idx_2] / n_threads)
+    batch_size_per_thread = int(shape[batch_dim_idx_2] / n_threads)
+
+    new_batch_array_shape = []
+    new_batch_array_chunks = []
+    # Putting the accumulation dim first
+    for i in range(len(shape)):
+        if i == batch_dim_idx:
+            new_batch_array_shape.append(num_chunks_final)
+            new_batch_array_chunks.append(int(variable_array_chunks[i]))
+
+    # Other dims are in order after the accumulation dim
+    for i in range(len(shape)):
+        if i != batch_dim_idx:
+            new_batch_array_shape.append(shape[i])
+            if i == batch_dim_idx_2:
+                new_batch_array_chunks.append(num_batches)
+            else:
+                new_batch_array_chunks.append(shape[i])
+
+    print("new_batch_array_shape:", tuple(new_batch_array_shape))
+    print("new_batch_array_chunks:", tuple(new_batch_array_chunks))
+
+    batch_dataset = acc_group.create_dataset(
+        acc_dim_name,
+        shape=tuple(new_batch_array_shape),
+        chunks=tuple(new_batch_array_chunks),
+        compressor=compressor,
+        # Filter goes here after figuring out how to handle it
+        dtype="f4",
+        overwrite=True,
+    )
+
+    # Process weights here
+
+    # print(acc_group[acc_dim_name].shape)
+    batch_array_dask = da.from_array(
+        acc_group[acc_dim_name_temp], acc_group[acc_dim_name_temp].shape
+    )
+    print("batch_array_dask.shape", batch_array_dask.shape)
+    # Weight array here
+
+    processes = []
+    for i in range(n_threads):
+        batch_idx_start = i * batch_size_per_thread
+        batch_idx_end = (i + 1) * batch_size_per_thread
+        process = Process(
+            target=compute_batch_dimension,
+            args=(
+                batch_array_dask,
+                batch_dataset,
+                batch_dim_stride,
+                new_batch_array_chunks,
+                batch_idx_start,
+                batch_idx_end,
+            ),
+        )
+        process.start()
+        processes.append(process)
+
+    for process in processes:
+        process.join()
+
+    # Delete temp dataset
 
     return
 
 
 if __name__ == "__main__":
+    # Setting variables - hardcoded for now.
+    # We can perhaps let the user set these variables in command line arguments or in helper script
+    batch_size = 100
+    batch_dim_idx = 2  # np.argmax(shape) Turn this into the largest dimension, keeping time now to validate with old code
+
     # Open input Zarr store
     store_input = zarr.DirectoryStore("data/GPM_3IMERGHH_06_precipitationCal")
     root = zarr.open(store_input)
     variable_array = root["variable"]
-
-    # Create accumulation group and the attribute file
-    # Assume user has created this attribute file, so only doing here during developing code
-    acc_group = root.create_group("variable_accumulation_group", overwrite=True)
-    acc_group.attrs["_ACCUMULATION_GROUP"] = {
-        "latitude": {
-            "_DATA_WEIGHTED": "acc_lat",
-            "_WEIGHTS": "acc_wt_lat",
-            "longitude": {
-                "_DATA_WEIGHTED": "acc_lat_lon",
-                "_WEIGHTS": "acc_wt_lat_lon",
-                "time": {},
-            },
-            "time": {},
-        },
-        "longitude": {
-            "_DATA_WEIGHTED": "acc_lon",
-            "_WEIGHTS": "acc_wt_lon",
-            "time": {},
-        },
-        "time": {"_DATA_WEIGHTED": "acc_time", "_WEIGHTS": "acc_wt_time"},
-    }
 
     # Get accumulation group
     acc_group = root["variable_accumulation_group"]
@@ -176,6 +277,7 @@ if __name__ == "__main__":
     for dim_i, dim in enumerate(dimensions):
         dim_to_idx[dim] = dim_i
     print("dim_to_idx:", dim_to_idx)
+
     # Swap key and value
     idx_to_dim = {v: k for k, v in dim_to_idx.items()}
     print("idx_to_dim:", idx_to_dim, "\n")
@@ -187,7 +289,6 @@ if __name__ == "__main__":
     print("dim_combinations:", dim_combinations, "\n")
 
     # Construct spec lists of accumulation array names and the indices
-    # Changed from dictionary to lists
     accumulation_names = []
     accumulation_weight_names = []
     accumulation_dimensions = []
@@ -210,27 +311,6 @@ if __name__ == "__main__":
     print("accumulation_weight_names:", accumulation_weight_names)
     print("accumulation_dimensions:", accumulation_dimensions)
 
-    # Innitialize data arrays for accumulation datasets
-    # Later remove this part - assume user creates datasets with zattr files?
-    for dim in accumulation_names + accumulation_weight_names:
-        dataset = acc_group.create_dataset(
-            dim,
-            shape=(0, 0, 0),  # Dummy empty shape, will update after getting stride info
-            overwrite=True,
-        )
-
-        # Making the zattr for each dataset here while developing code
-        if dim == "acc_lat" or dim == "acc_wt_lat":
-            stride_list = [2, 0, 0]
-        if dim == "acc_lon" or dim == "acc_wt_lon":
-            stride_list = [0, 2, 0]
-        if dim == "acc_lat_lon" or dim == "acc_wt_lat_lon":
-            stride_list = [2, 2, 0]
-        if dim == "acc_time" or dim == "acc_wt_time":
-            stride_list = [0, 0, 1]
-        dataset.attrs["_ARRAY_DIMENSIONS"] = ["latitude", "longitude", "time"]
-        dataset.attrs["_ACCUMULATION_STRIDE"] = stride_list
-
     # Get stride info and create arrays for length/shape/chunks
     accumulation_strides = []
     for dim in accumulation_names:
@@ -250,9 +330,23 @@ if __name__ == "__main__":
         stride = accumulation_strides[dim_i]
         array_shape = []
         array_chunk = []
-        for dim_j, tup in enumerate(dim_idx_tuple):
-            element = int(shape[dim_j] / (chunks[dim_j] * stride[dim_j]))
+        for dim_j, tup_val in enumerate(dim_idx_tuple):
+            # print("tup value: ", tup_val)
+            # print("(shape[tup]", shape[tup_val])
+            # print("chunks[tup]", chunks[tup_val])
+            # print("stride[tup]", stride[dim_j], "\n")
+
+            # Batch dimension (e.g., time) will not have stride applied until final assembly
+            if dim_i == batch_dim_idx:
+                stride_value = 1
+            else:
+                stride_value = stride[dim_j]
+            element = int(shape[tup_val] / (chunks[tup_val] * stride_value))
             array_shape.append(element)
+
+            # Batch dimension (e.g., time) will be 1 in chunks
+            if dim_i == batch_dim_idx:
+                element = 1
             array_chunk.append(element)
 
         for dim_k in range(len(shape)):
@@ -268,16 +362,21 @@ if __name__ == "__main__":
     print("array_chunks:", array_chunks, "\n")
 
     # Update Zarr arrays' shape and chunks
+    # Currently making new dataset with copying attribute files over. There might be better
     for dim_i, (dim, dim_weight) in enumerate(
         zip(accumulation_names, accumulation_weight_names)
     ):
-        # This works to update shape: acc_group[dim].shape = array_shapes[dim_i]
-        # But this line gives error: AttributeError: can't set attribute
-        # "Changing the chunk size of a zarr array would require rewriting all of the data."
-        # acc_group[dim].chunks = # array_chunks[dim_i]
-        # So creating new dataset with copying the attributes over
+        # Creating new dataset with copying the attributes over
         attributes_dim = acc_group[dim].attrs["_ARRAY_DIMENSIONS"]
         attributes_stride = acc_group[dim].attrs["_ACCUMULATION_STRIDE"]
+
+        # For the batch dim (e.g., time and time weight), first create a temp dataset
+        if dim_i == batch_dim_idx:
+            dim += "_temp"
+            dim_weight += "_temp"
+            print("temp dim", dim)
+            print("temp dim_weight", dim_weight)
+
         dataset = acc_group.create_dataset(
             dim,
             shape=array_shapes[dim_i],
@@ -312,61 +411,66 @@ if __name__ == "__main__":
 
     # Convert data to dask array
     # Update chunks after applying strides
-    strides = np.array([tup[0] for tup in accumulation_strides])[: len(chunks)]
+    strides = []
+    for tup_i, tup in enumerate(accumulation_strides):
+        # Batch dimension (e.g., time) - apply stride at assembly step, so stride=1 here
+        if tup_i == batch_dim_idx:
+            strides.append(1)
+        else:
+            strides.append(tup[0])
+    strides = np.array(strides)[: len(chunks)]
+
     variable_array_chunks = strides * np.array(chunks)
     print("variable_array_chunks", variable_array_chunks, "\n")
     variable_array_dask = da.from_array(
         variable_array.astype("f8"), variable_array_chunks
     )
 
-    ##########
-    # import copy
-
-    # # Make weighted variable array
-    # weight_dim_idx = 0
-    # weight_dim = idx_to_dim[weight_dim_idx]  # latitude
-    # x = copy.deepcopy(variable_array_dask) >= 0
-    # weighted_array =
-    # print(x)
-    # exit()
-
     # Compute
-    # How to generalize the batches - pick an arbitrary dimension to use?
-    # Need a place to set these variables - how is this batch size chosen?
-    batch_size = 100
-    batch_dim_idx = 2
-    batch_dim = idx_to_dim[batch_dim_idx]  # time
+    batch_dim = idx_to_dim[batch_dim_idx]
     batch_dim_chunk_size = variable_array_chunks[batch_dim_idx]
     batch_dim_num_chunks = int(shape[batch_dim_idx] / batch_dim_chunk_size)
     print(
         "batch_dim_chunk_size:",
         batch_dim_chunk_size,
-        "batch_dim_num_chunks:",
+        "\nbatch_dim_num_chunks:",
         batch_dim_num_chunks,
         "\n",
     )
 
-    # Test on 1 batch
-    i = 0
-    batch_idx_start = i * batch_dim_chunk_size
-    batch_idx_end = (i + 1) * batch_dim_chunk_size
-    print("Range: ", batch_idx_start, batch_idx_end)
-    run_compute_write_zarr(
-        acc_group,
-        array_shapes,
-        array_chunks,
-        accumulation_names,
-        accumulation_weight_names,
-        accumulation_dimensions,
-        variable_array_dask,
-        variable_array_chunks,
-        weight_dask,
-        batch_dim_idx,
-        batch_idx_start,
-        batch_idx_end,
-    )
-    exit()
+    # # Test on 1 batch
+    # i = 0
+    # batch_idx_start = i * batch_dim_chunk_size
+    # batch_idx_end = (i + 1) * batch_dim_chunk_size
+    # print("Range: ", batch_idx_start, batch_idx_end)
+    # compute_write_zarr(
+    #     acc_group,
+    #     array_shapes,
+    #     array_chunks,
+    #     accumulation_names,
+    #     accumulation_weight_names,
+    #     accumulation_dimensions,
+    #     variable_array_dask,
+    #     variable_array_chunks,
+    #     weight_dask,
+    #     batch_dim_idx,
+    #     batch_idx_start,
+    #     batch_idx_end,
+    # )
 
+    # # Compute the batch dimension - batch_dim_idx (e.g., time)
+    # assemble_batch_dimension(
+    #     batch_dim_idx,
+    #     accumulation_names,
+    #     accumulation_weight_names,
+    #     acc_group,
+    #     array_shapes,
+    #     shape,
+    #     variable_array_chunks,
+    # )
+    # exit()
+
+    # Run entire dataset
     for batch_start in range(0, batch_dim_num_chunks, batch_size):
         print("Batch: ", batch_start)
         processes = []
@@ -376,7 +480,7 @@ if __name__ == "__main__":
             batch_idx_end = (i + 1) * batch_dim_chunk_size
             print("Range: ", batch_idx_start, batch_idx_end)
             process = Process(
-                target=run_compute_write_zarr,
+                target=compute_write_zarr,
                 args=(
                     acc_group,
                     array_shapes,
@@ -400,3 +504,13 @@ if __name__ == "__main__":
         for process in processes:
             process.join()
 
+    # Final compute and assembly for the batch dimension - batch_dim_idx (e.g., time)
+    assemble_batch_dimension(
+        batch_dim_idx,
+        accumulation_names,
+        accumulation_weight_names,
+        acc_group,
+        array_shapes,
+        shape,
+        variable_array_chunks,
+    )
