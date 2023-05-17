@@ -119,6 +119,9 @@ def compute_write_zarr(
             print("result.shape", result.shape)
             # print("result", result)
 
+        # Convert result to less precise type to append
+        result = result.astype("float32")
+
         # Save result to Zarr
         if dim_i == batch_dim_idx:
             dim_name = accumulation_names[dim_i] + "_temp"
@@ -383,7 +386,7 @@ if __name__ == "__main__":
             chunks=array_chunks[dim_i],
             compressor=compressor,
             # Filter goes here after figuring out how to handle it
-            dtype="f4",  # Need to change for time
+            dtype="f4",
             overwrite=True,
         )
         dataset.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
