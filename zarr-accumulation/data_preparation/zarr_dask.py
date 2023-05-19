@@ -34,8 +34,8 @@ def compute_block_sum(
     outputs = outputs.reshape(len(outputs))
     for i in range(len(block.shape) - 1):
         outputs = np.expand_dims(outputs, axis=i)
-    # print("outputs.shape", outputs.shape)
 
+    # print("outputs.shape, block_info", outputs.shape, block_info)
     return outputs
 
 
@@ -46,6 +46,7 @@ def compute_write_zarr(
     accumulation_names,
     accumulation_weight_names,
     accumulation_dimensions,
+    accumulation_dim_orders_idx,
     variable_array_dask,
     variable_array_chunks,
     weight_dask,
@@ -53,8 +54,8 @@ def compute_write_zarr(
     batch_idx_start,
     batch_idx_end,
 ):
-    idx_acc_time = int(batch_idx_start / variable_array_chunks[batch_dim_idx])
-    print("idx_acc_time:", idx_acc_time)
+    idx_acc = int(batch_idx_start / variable_array_chunks[batch_dim_idx])
+    print("idx_acc:", idx_acc)
 
     # Compute
     slice_list = [slice(None)] * variable_array_dask.ndim
@@ -72,11 +73,14 @@ def compute_write_zarr(
         weight_dask=weight_dask,
         chunks=variable_array_chunks,
     ).compute()
-    print("block_sums.shape:", block_sums.shape)
+    # print("block_sums.shape:", block_sums.shape)
+    # exit()
 
     # Extract data
     current_idx = 0
     for dim_i, dim_idx in enumerate(accumulation_dimensions):
+
+        print(f"\nDim: {accumulation_names[dim_i]}")
 
         # Get idx of array in flattened outputs
         chunk_indices = np.arange(0, len(block_sums.shape))
@@ -96,68 +100,157 @@ def compute_write_zarr(
         # Get sum result and compute cumsum
         result = block_sums[:, :, current_idx:end_idx]
 
-        if len(chunk_indices) > 1:  # Don't reshape for acc_latlon
-            # For dimension we're batching over (e.g., time)
-            if dim_i == batch_dim_idx:
-                result = result.reshape(array_shapes[dim_i][1], array_shapes[dim_i][2])
+        ##### New change to adapt to user's defined final dimension order
+        result_shape = result.shape
+        print("result.shape:", result.shape)  # lat: (25, 25, 28800)
+        reshape_1_shapes = []
+        reshape_1_indices = []
+        # Loop over num chunk dimensions besides the last (e.g., nalat, nalon)
+        for i, shape in enumerate(result_shape[:-1]):
+            reshape_1_shapes.append(shape)
+            reshape_1_indices.append(i)
+        # print("reshape_1_shapes", reshape_1_shapes)  # [25, 25]
+        # print("reshape_1_indices", reshape_1_indices)  # [0, 1]
+
+        # Add to the lists the chunk dimensions.
+        # For example, for lat: (e.g., clat, clon).
+        # For the first reshape we have the shapes e.g., (nalat, nalon, clon, ctime)
+        # and the corresponding indices e.g. (0, 1, 1, 2)
+        reshape_1_shapes.extend(list(chunk_sizes_to_index))
+        reshape_1_indices.extend(list(chunk_indices))
+        print("reshape_1_shapes", reshape_1_shapes)  # lat: [25, 25, 144, 200]
+        print("reshape_1_indices", reshape_1_indices)  # lat: [0, 1, 1, 2]
+
+        # Do first reshape
+        result = result.reshape(reshape_1_shapes)
+        print("result.shape", result.shape)
+
+        # Transpose to bring together the same dims e.g., (nalat, nalon, clon, ctime) if they're not adjacent already
+        # For lon, we'd go from (nalat, nalon, clat, ctime) -> (nalat, clat, nalon, ctime)
+        # Get the indices that would sort reshape_1_indices
+        sort_indices = np.argsort(reshape_1_indices)
+        print("sort_indices", sort_indices)  # lat: [0 1 2 3]
+        new_indices = np.sort(reshape_1_indices)  # sort this to use later
+        print("new_indices", new_indices)
+
+        # Apply sort_indices to result.transpose()
+        result = result.transpose(tuple(sort_indices))
+        print("result.shape", result.shape)  # lat: (25, 25, 144, 200)
+
+        # Second reshape operation to multiply the dim that appears more than once
+        # E.g., lat: (nalat, nalon * clon, ctime), lon: (nalat * clat, nalon, ctime)
+        # First, find duplicates in reshape_1_indices
+        seen_indices = []  # set()
+        reshape_2_shapes = []
+        for idx, value in enumerate(new_indices):
+            if value not in seen_indices:
+                # If unique value
+                reshape_2_shapes.append(result.shape[idx])
+                # seen_indices.add(value)
+                seen_indices.append(value)
+                print(reshape_2_shapes, seen_indices)
             else:
-                result = result.reshape(
-                    (
-                        array_shapes[dim_i][0],
-                        array_shapes[dim_i][1],
-                        batch_idx_end - batch_idx_start,
-                    )
-                )
+                # If duplicate value, multiply the corresponing element in
+                # result.shape with with previous element in reshape_2_shapes (i.e., reshape_2_shapes[-1])
+                # to update this value in reshape_2_shapes
+                # FIX ^: multiply to idx thats the same not the previous element
+                print(idx, value)
+                print(np.where(seen_indices == value)[0][0])
+                reshape_2_shapes[np.where(seen_indices == value)[0][0]] *= result.shape[
+                    idx
+                ]
+                # reshape_2_shapes[-1] *= result.shape[idx]
+                # reshape_2_shapes[-1] *= result.shape[idx]
+        # print(reshape_2_shapes)  # Lat: [25, 3600, 200]
+        # Apply the second reshape to result
+        result = result.reshape(reshape_2_shapes)
+        print("result.shape", result.shape)  # lat: (25, 3600, 200)
 
-        # Loop over indices and perform cumsum in each dim
-        # Skip cumsum for dimension we're batching over (e.g., dim "2" or time)
-        if dim_i == batch_dim_idx:
-            print("Skipping cumsum for batch dimension", batch_dim_idx)
-        else:
+        # Compute cumsum over the accumulation dim (dim_idx)
+        # Skip cumsum for batch dim
+        if dim_i != batch_dim_idx:
             for i in range(len(dim_idx)):
+                # print("dim_idx", dim_idx)
                 result = result.cumsum(axis=i)
-            print("result.shape", result.shape)
-            # print("result", result)
+            print("result.shape", result.shape)  # lat: (25, 3600, 200)
 
-        # Convert result to less precise type to append
-        result = result.astype("float32")
+        # Final transpose to user-specified order, except for batch dim (e.g., time)
+        if dim_i != batch_dim_idx:
+            result = result.transpose(accumulation_dim_orders_idx[dim_i])
+            print("result.shape", result.shape)  # lat: (25, 200, 3600)
 
         # Save result to Zarr
+        assigning_slice = []
+        for i, dim_order_idx in enumerate(accumulation_dim_orders_idx[dim_i]):
+            # print(dim_order_idx)
+            if dim_order_idx == batch_dim_idx:
+                # print(dim_order_idx)
+                if dim_i != batch_dim_idx:
+                    assigning_slice.append(slice(batch_idx_start, batch_idx_end, None))
+                else:
+                    # For the batch dim, use idx_acc, not batch_idx_start:batch_idx_end
+                    # start_slice_idx = np.max(0, idx_acc - 1)  # To avoid negative
+                    assigning_slice.append(slice(idx_acc, idx_acc + 1, None))
+
+                    # Expand a dimension for result at this idx
+                    result = np.expand_dims(result, axis=i)
+                    print("result.shape - expand dim", result.shape)
+            else:
+                # Equivalent to : (full slice)
+                assigning_slice.append(slice(None, None, None))
+        print(assigning_slice)
+
+        dim_name = accumulation_names[dim_i]
         if dim_i == batch_dim_idx:
-            dim_name = accumulation_names[dim_i] + "_temp"
-            acc_group[dim_name][idx_acc_time, :, :] = result
-        else:
-            acc_group[accumulation_names[dim_i]][
-                :, :, batch_idx_start:batch_idx_end
-            ] = result
+            dim_name += "_temp"
+        print(
+            "acc_group[dim_name][tuple(assigning_slice)].shape",
+            acc_group[dim_name][tuple(assigning_slice)].shape,
+        )
+        acc_group[dim_name][tuple(assigning_slice)] = result
 
         # Update current_idx in flattened outputs
         current_idx = end_idx
         print("\n")
+
     return
 
 
 def compute_batch_dimension(
     batch_array_dask,
     batch_dataset,
+    dim_order_idx,
+    batch_dim_idx,
+    batch_dim_idx_2,
     batch_dim_stride,
     new_batch_array_chunks,
     batch_idx_start,
     batch_idx_end,
 ):
+    # print("batch_array_dask.shape", batch_array_dask.shape)
+
     # Do cumsum for the batch dimension (e.g., time) and update zarr array
     # Previously f_time()
-    # The accumulation dimension is right now always the first dimension in the respective array, so axis=0
+    slice_list = [slice(None)] * batch_array_dask.ndim
+    slice_list[batch_dim_idx_2] = slice(batch_idx_start, batch_idx_end)
+    # print(batch_dim_idx_2, slice_list)
+    # print(slice_list)
+
+    cumsum_axis = list(dim_order_idx).index(batch_dim_idx)
+    # print(cumsum_axis)
+    slice_list_cumsum = [slice(None)] * batch_array_dask.ndim
+    slice_list_cumsum[cumsum_axis] = slice(1, None, batch_dim_stride)
+    # print(slice_list_cumsum)
+
     result = (
-        batch_array_dask[:, batch_idx_start:batch_idx_end, :]
-        .cumsum(axis=0)[1::batch_dim_stride, :, :]
+        batch_array_dask[tuple(slice_list)]
+        .cumsum(axis=cumsum_axis)[tuple(slice_list_cumsum)]  # No transpose needed
         .rechunk(new_batch_array_chunks)
-        .astype("f4")
         .compute()
     )
     # print("result.shape", result.shape)
     # print("result", result)
-    batch_dataset[:, batch_idx_start:batch_idx_end, :] = result
+    batch_dataset[tuple(slice_list)] = result
 
     # Operate on weights here
 
@@ -168,48 +261,59 @@ def assemble_batch_dimension(
     batch_dim_idx,
     accumulation_names,
     accumulation_weight_names,
+    accumulation_dim_orders_idx,
     acc_group,
     array_shapes,
     shape,
+    num_chunks,
     variable_array_chunks,
+    batch_dim_idx_2=0,
+    n_threads=9,
 ):
     # Pick the first dimension (e.g., lat or 0) to batch over
-    # These are hardcoded for now... make as parameters?
-    batch_dim_idx_2 = 0
-    n_threads = 9
+    # batch_dim_idx_2 and n_threads can perhaps become user-selected parameters
 
     acc_dim_name = accumulation_names[batch_dim_idx]
     acc_dim_name_temp = acc_dim_name + "_temp"
     print(f"Final assembly for dimension: {acc_dim_name}")
 
+    attributes_dim = acc_group[acc_dim_name].attrs["_ARRAY_DIMENSIONS"]
+    attributes_stride = acc_group[acc_dim_name].attrs["_ACCUMULATION_STRIDE"]
+    # print(attributes_dim, attributes_stride)
+
     # Always a 1-element tuple e.g., (2,)
     batch_dim_stride = accumulation_strides[batch_dim_idx][0]
+    print("batch_dim_stride", batch_dim_stride)
 
     # Create final dataset and run compute for the batch dimension (e.g., time)
-    num_chunks_final = int(array_shapes[batch_dim_idx][0] / batch_dim_stride)
+    # num_chunks_final = int(array_shapes[batch_dim_idx][0] / batch_dim_stride)
+    num_chunks_final = int(num_chunks[batch_dim_idx] / batch_dim_stride)
     chunk_size = variable_array_chunks[batch_dim_idx]
     num_batches = int(variable_array_chunks[batch_dim_idx_2] / n_threads)
     batch_size_per_thread = int(shape[batch_dim_idx_2] / n_threads)
 
+    print("num_chunks_final:", num_chunks_final)
+    print("num_batches:", num_batches)
+    print("batch_size_per_thread:", batch_size_per_thread)
+
     new_batch_array_shape = []
     new_batch_array_chunks = []
-    # Putting the accumulation dim first
-    for i in range(len(shape)):
-        if i == batch_dim_idx:
+    # Make final shape and chunks for this dim
+    dim_idx_tuple = accumulation_dimensions[batch_dim_idx]  # (2,)
+    dim_order_idx = accumulation_dim_orders_idx[batch_dim_idx]  # (0, 2, 1)
+    for dim_j, idx_val in enumerate(dim_order_idx):
+        if idx_val in dim_idx_tuple:
+            # Append number of chunks in the accumulation dimension
             new_batch_array_shape.append(num_chunks_final)
-            new_batch_array_chunks.append(int(variable_array_chunks[i]))
-
-    # Other dims are in order after the accumulation dim
-    for i in range(len(shape)):
-        if i != batch_dim_idx:
-            new_batch_array_shape.append(shape[i])
-            if i == batch_dim_idx_2:
-                new_batch_array_chunks.append(num_batches)
-            else:
-                new_batch_array_chunks.append(shape[i])
-
-    print("new_batch_array_shape:", tuple(new_batch_array_shape))
-    print("new_batch_array_chunks:", tuple(new_batch_array_chunks))
+            new_batch_array_chunks.append(int(variable_array_chunks[idx_val]))
+        elif idx_val == batch_dim_idx_2:
+            new_batch_array_shape.append(shape[idx_val])
+            new_batch_array_chunks.append(num_batches)
+        else:
+            new_batch_array_shape.append(shape[idx_val])
+            new_batch_array_chunks.append(shape[idx_val])
+    print("new_batch_array_shape:", new_batch_array_shape)
+    print("array_chunk:", new_batch_array_chunks, "\n")
 
     batch_dataset = acc_group.create_dataset(
         acc_dim_name,
@@ -217,13 +321,13 @@ def assemble_batch_dimension(
         chunks=tuple(new_batch_array_chunks),
         compressor=compressor,
         # Filter goes here after figuring out how to handle it
-        dtype="f4",
         overwrite=True,
     )
+    # Copy attribute file to new dataset
+    batch_dataset.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
+    batch_dataset.attrs["_ACCUMULATION_STRIDE"] = attributes_stride
 
     # Process weights here
-
-    # print(acc_group[acc_dim_name].shape)
     batch_array_dask = da.from_array(
         acc_group[acc_dim_name_temp], acc_group[acc_dim_name_temp].shape
     )
@@ -234,11 +338,15 @@ def assemble_batch_dimension(
     for i in range(n_threads):
         batch_idx_start = i * batch_size_per_thread
         batch_idx_end = (i + 1) * batch_size_per_thread
+        # print("batch_idx_start, batch_idx_end", batch_idx_start, batch_idx_end)
         process = Process(
             target=compute_batch_dimension,
             args=(
                 batch_array_dask,
                 batch_dataset,
+                dim_order_idx,
+                batch_dim_idx,
+                batch_dim_idx_2,
                 batch_dim_stride,
                 new_batch_array_chunks,
                 batch_idx_start,
@@ -316,56 +424,72 @@ if __name__ == "__main__":
 
     # Get stride info and create arrays for length/shape/chunks
     accumulation_strides = []
+    accumulation_dim_orders = []
+    accumulation_dim_orders_idx = []
     for dim in accumulation_names:
         stride = tuple(
             [s for s in dict(acc_group[dim].attrs)["_ACCUMULATION_STRIDE"] if s != 0]
         )
         accumulation_strides.append(stride)
-    print("accumulation_strides:", accumulation_strides, "\n")
+
+        dim_order = []
+        dim_order_idx = []
+        for o in dict(acc_group[dim].attrs)["_ARRAY_DIMENSIONS"]:
+            dim_order.append(o)
+            dim_order_idx.append(dim_to_idx[o])
+        # dim_order = tuple(
+        #     [s for s in dict(acc_group[dim].attrs)["_ARRAY_DIMENSIONS"] if s != 0]
+        # )
+        accumulation_dim_orders.append(tuple(dim_order))
+        accumulation_dim_orders_idx.append(tuple(dim_order_idx))
+    print("accumulation_strides:", accumulation_strides)
+    print("accumulation_dim_orders:", accumulation_dim_orders)
+    print("accumulation_dim_orders_idx:", accumulation_dim_orders_idx, "\n")
 
     shape = variable_array.shape
     chunks = variable_array.chunks
-    print("shape:", shape, "-- chunks:", chunks)
 
+    # Adapting these lists to the dim order the user has in dataset attribute files
     array_shapes = []
     array_chunks = []
     for dim_i, dim_idx_tuple in enumerate(accumulation_dimensions):
+        # print("dim_idx_tuple:", dim_idx_tuple)
         stride = accumulation_strides[dim_i]
+        dim_order_idx = accumulation_dim_orders_idx[dim_i]
+        # print("stride:", stride)
+        # print("dim_order_idx:", dim_order_idx)
+
         array_shape = []
         array_chunk = []
-        for dim_j, tup_val in enumerate(dim_idx_tuple):
-            # print("tup value: ", tup_val)
-            # print("(shape[tup]", shape[tup_val])
-            # print("chunks[tup]", chunks[tup_val])
-            # print("stride[tup]", stride[dim_j], "\n")
+        count = 0
+        for dim_j, idx_val in enumerate(dim_order_idx):
+            # print("idx value: ", idx_val)
+            if idx_val in dim_idx_tuple:
+                # Append number of chunks in the accumulation dimension
+                if dim_i == batch_dim_idx:
+                    stride_value = 1
+                else:
+                    stride_value = stride[count]
+                num_chunks = int(shape[idx_val] / (chunks[idx_val] * stride_value))
+                array_shape.append(num_chunks)
 
-            # Batch dimension (e.g., time) will not have stride applied until final assembly
-            if dim_i == batch_dim_idx:
-                stride_value = 1
+                # Batch dimension (e.g., time) will be 1 in chunks at first
+                if dim_i == batch_dim_idx:
+                    num_chunks = 1
+                array_chunk.append(num_chunks)
+                count += 1
             else:
-                stride_value = stride[dim_j]
-            element = int(shape[tup_val] / (chunks[tup_val] * stride_value))
-            array_shape.append(element)
-
-            # Batch dimension (e.g., time) will be 1 in chunks
-            if dim_i == batch_dim_idx:
-                element = 1
-            array_chunk.append(element)
-
-        for dim_k in range(len(shape)):
-            if dim_k not in dim_idx_tuple:
-                shape_element = shape[dim_k]
-                chunk_element = chunks[dim_k]
-                array_shape.append(shape_element)
-                array_chunk.append(chunk_element)
-
+                # If not the accumulation dimension, then append the length and chunk size
+                array_shape.append(shape[idx_val])
+                array_chunk.append(chunks[idx_val])
         array_shapes.append(array_shape)
         array_chunks.append(array_chunk)
+        # print("\n")
     print("array_shapes:", array_shapes)
     print("array_chunks:", array_chunks, "\n")
 
     # Update Zarr arrays' shape and chunks
-    # Currently making new dataset with copying attribute files over. There might be better
+    # Currently making new dataset with copying attribute files over
     for dim_i, (dim, dim_weight) in enumerate(
         zip(accumulation_names, accumulation_weight_names)
     ):
@@ -373,20 +497,23 @@ if __name__ == "__main__":
         attributes_dim = acc_group[dim].attrs["_ARRAY_DIMENSIONS"]
         attributes_stride = acc_group[dim].attrs["_ACCUMULATION_STRIDE"]
 
+        arr_shape = array_shapes[dim_i]
+        arr_chunks = array_chunks[dim_i]
+        # print(arr_shape, arr_chunks)
+
         # For the batch dim (e.g., time and time weight), first create a temp dataset
         if dim_i == batch_dim_idx:
             dim += "_temp"
             dim_weight += "_temp"
-            print("temp dim", dim)
-            print("temp dim_weight", dim_weight)
+            # print("temp dim", dim)
+            # print("temp dim_weight", dim_weight)
 
         dataset = acc_group.create_dataset(
             dim,
-            shape=array_shapes[dim_i],
-            chunks=array_chunks[dim_i],
+            shape=arr_shape,
+            chunks=arr_chunks,
             compressor=compressor,
             # Filter goes here after figuring out how to handle it
-            dtype="f4",
             overwrite=True,
         )
         dataset.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
@@ -394,11 +521,10 @@ if __name__ == "__main__":
 
         dataset_weight = acc_group.create_dataset(
             dim_weight,
-            shape=array_shapes[dim_i],
-            chunks=array_chunks[dim_i],
+            shape=arr_shape,
+            chunks=arr_chunks,
             compressor=compressor,
             # Filter goes here after figuring out how to handle it
-            dtype="f4",  # Need to change for time
             overwrite=True,
         )
         dataset_weight.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
@@ -421,12 +547,19 @@ if __name__ == "__main__":
             strides.append(1)
         else:
             strides.append(tup[0])
-    strides = np.array(strides)[: len(chunks)]
+    strides = tuple(np.array(strides)[: len(chunks)])
+    # print("strides:", strides)
 
     variable_array_chunks = strides * np.array(chunks)
     print("variable_array_chunks", variable_array_chunks, "\n")
     variable_array_dask = da.from_array(
         variable_array.astype("f8"), variable_array_chunks
+    )
+
+    # Get number of chunks
+    num_chunks = tuple(np.array(shape) / variable_array_chunks)
+    print(
+        f"shape: {shape} -- strides: {strides} -- variable_array_chunks: {tuple(variable_array_chunks)}  -- num_chunks: {num_chunks}\n"
     )
 
     # Compute
@@ -441,37 +574,40 @@ if __name__ == "__main__":
         "\n",
     )
 
-    # # Test on 1 batch
-    # i = 0
-    # batch_idx_start = i * batch_dim_chunk_size
-    # batch_idx_end = (i + 1) * batch_dim_chunk_size
-    # print("Range: ", batch_idx_start, batch_idx_end)
-    # compute_write_zarr(
-    #     acc_group,
-    #     array_shapes,
-    #     array_chunks,
-    #     accumulation_names,
-    #     accumulation_weight_names,
-    #     accumulation_dimensions,
-    #     variable_array_dask,
-    #     variable_array_chunks,
-    #     weight_dask,
-    #     batch_dim_idx,
-    #     batch_idx_start,
-    #     batch_idx_end,
-    # )
+    # Test on 1 batch
+    i = 0
+    batch_idx_start = i * batch_dim_chunk_size
+    batch_idx_end = (i + 1) * batch_dim_chunk_size
+    print("Range: ", batch_idx_start, batch_idx_end)
+    compute_write_zarr(
+        acc_group,
+        array_shapes,
+        array_chunks,
+        accumulation_names,
+        accumulation_weight_names,
+        accumulation_dimensions,
+        accumulation_dim_orders_idx,
+        variable_array_dask,
+        variable_array_chunks,
+        weight_dask,
+        batch_dim_idx,
+        batch_idx_start,
+        batch_idx_end,
+    )
 
-    # # Compute the batch dimension - batch_dim_idx (e.g., time)
-    # assemble_batch_dimension(
-    #     batch_dim_idx,
-    #     accumulation_names,
-    #     accumulation_weight_names,
-    #     acc_group,
-    #     array_shapes,
-    #     shape,
-    #     variable_array_chunks,
-    # )
-    # exit()
+    # Compute the batch dimension - batch_dim_idx (e.g., time)
+    assemble_batch_dimension(
+        batch_dim_idx,
+        accumulation_names,
+        accumulation_weight_names,
+        accumulation_dim_orders_idx,
+        acc_group,
+        array_shapes,
+        shape,
+        num_chunks,
+        variable_array_chunks,
+    )
+    exit()
 
     # Run entire dataset
     for batch_start in range(0, batch_dim_num_chunks, batch_size):
@@ -491,6 +627,7 @@ if __name__ == "__main__":
                     accumulation_names,
                     accumulation_weight_names,
                     accumulation_dimensions,
+                    accumulation_dim_orders_idx,
                     variable_array_dask,
                     variable_array_chunks,
                     weight_dask,
@@ -512,8 +649,11 @@ if __name__ == "__main__":
         batch_dim_idx,
         accumulation_names,
         accumulation_weight_names,
+        accumulation_dim_orders_idx,
         acc_group,
         array_shapes,
         shape,
+        num_chunks,
         variable_array_chunks,
     )
+

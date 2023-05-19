@@ -74,14 +74,31 @@ if __name__ == "__main__":
             overwrite=True,
         )
 
-        # Making the zattr for each dataset here while developing code
+        # # Making the zattr for each dataset here while developing code
+        # if dim == "acc_lat" or dim == "acc_wt_lat":
+        #     stride_list = [2, 0, 0]
+        # if dim == "acc_lon" or dim == "acc_wt_lon":
+        #     stride_list = [0, 2, 0]
+        # if dim == "acc_lat_lon" or dim == "acc_wt_lat_lon":
+        #     stride_list = [2, 2, 0]
+        # if dim == "acc_time" or dim == "acc_wt_time":
+        #     stride_list = [0, 0, 2]
+        # # The dimension order can be changed
+        # dataset.attrs["_ARRAY_DIMENSIONS"] = ["latitude", "longitude", "time"]
+        # dataset.attrs["_ACCUMULATION_STRIDE"] = stride_list
+
+        # Different dimensions order for each dataset
         if dim == "acc_lat" or dim == "acc_wt_lat":
+            dimension_list = ["latitude", "time", "longitude"]
             stride_list = [2, 0, 0]
         if dim == "acc_lon" or dim == "acc_wt_lon":
-            stride_list = [0, 2, 0]
+            dimension_list = ["longitude", "time", "latitude"]
+            stride_list = [2, 0, 0]
         if dim == "acc_lat_lon" or dim == "acc_wt_lat_lon":
+            dimension_list = ["latitude", "longitude", "time"]
             stride_list = [2, 2, 0]
         if dim == "acc_time" or dim == "acc_wt_time":
-            stride_list = [0, 0, 2]
-        dataset.attrs["_ARRAY_DIMENSIONS"] = ["latitude", "longitude", "time"]
+            dimension_list = ["latitude", "time", "longitude"]
+            stride_list = [0, 2, 0]
+        dataset.attrs["_ARRAY_DIMENSIONS"] = dimension_list
         dataset.attrs["_ACCUMULATION_STRIDE"] = stride_list
