@@ -312,6 +312,7 @@ def compute_batch_dimension(
     new_batch_array_chunks,
     batch_idx_start,
     batch_idx_end,
+    data_type,
 ):
     # print("batch_array_dask.shape", batch_array_dask.shape)
 
@@ -332,6 +333,7 @@ def compute_batch_dimension(
         batch_array_dask[tuple(slice_list)]
         .cumsum(axis=cumsum_axis)[tuple(slice_list_cumsum)]  # No transpose needed
         .rechunk(new_batch_array_chunks)
+        .astype(data_type)
         .compute()
     )
     # print("result.shape", result.shape)
@@ -343,6 +345,7 @@ def compute_batch_dimension(
         batch_array_dask_weight[tuple(slice_list)]
         .cumsum(axis=cumsum_axis)[tuple(slice_list_cumsum)]  # No transpose needed
         .rechunk(new_batch_array_chunks)
+        .astype(data_type)
         .compute()
     )
     # print("result.shape", result.shape)
@@ -362,6 +365,7 @@ def assemble_batch_dimension(
     shape,
     num_chunks,
     variable_array_chunks,
+    data_type,
     batch_dim_idx_2=0,
     n_threads=9,
 ):
@@ -391,8 +395,11 @@ def assemble_batch_dimension(
     batch_size_per_thread = int(shape[batch_dim_idx_2] / n_threads)
 
     # print("num_chunks_final:", num_chunks_final)
-    # print("num_batches:", num_batches)
-    # print("batch_size_per_thread:", batch_size_per_thread)
+    # print(
+    #     "variable_array_chunks[batch_dim_idx_2]", variable_array_chunks[batch_dim_idx_2]
+    # )  # 72
+    # print("num_batches:", num_batches)  # 8
+    # print("batch_size_per_thread:", batch_size_per_thread)  # 200
 
     new_batch_array_shape = []
     new_batch_array_chunks = []
@@ -418,6 +425,7 @@ def assemble_batch_dimension(
         shape=tuple(new_batch_array_shape),
         chunks=tuple(new_batch_array_chunks),
         compressor=compressor,
+        dtype=data_type,
         # Filter goes here after figuring out how to handle it
         overwrite=True,
     )
@@ -432,6 +440,7 @@ def assemble_batch_dimension(
         chunks=tuple(new_batch_array_chunks),
         compressor=compressor,
         # Filter goes here after figuring out how to handle it
+        dtype=data_type,
         overwrite=True,
     )
     # Copy attribute file to new dataset
@@ -450,6 +459,8 @@ def assemble_batch_dimension(
     )
 
     processes = []
+
+    # t = time.time()
     for i in range(n_threads):
         batch_idx_start = i * batch_size_per_thread
         batch_idx_end = (i + 1) * batch_size_per_thread
@@ -468,6 +479,7 @@ def assemble_batch_dimension(
                 new_batch_array_chunks,
                 batch_idx_start,
                 batch_idx_end,
+                data_type,
             ),
         )
         process.start()
@@ -475,6 +487,7 @@ def assemble_batch_dimension(
 
     for process in processes:
         process.join()
+    # print("compute_batch_dimension took: ", time.time() - t)
 
     # Delete temp dataset here?
 
@@ -491,6 +504,10 @@ if __name__ == "__main__":
     store_input = zarr.DirectoryStore("data/GPM_3IMERGHH_06_precipitationCal")
     root = zarr.open(store_input)
     variable_array = root["variable"]
+
+    # Get the original data type
+    data_type = variable_array.dtype.char + str(variable_array.dtype.itemsize)
+    print("data_type:", data_type)
 
     # Get fill value
     fill_value = variable_array.fill_value
@@ -642,6 +659,7 @@ if __name__ == "__main__":
             shape=arr_shape,
             chunks=arr_chunks,
             compressor=compressor,
+            dtype=data_type,
             # Filter goes here after figuring out how to handle it
             overwrite=True,
         )
@@ -653,6 +671,7 @@ if __name__ == "__main__":
             shape=arr_shape,
             chunks=arr_chunks,
             compressor=compressor,
+            dtype=data_type,
             # Filter goes here after figuring out how to handle it
             overwrite=True,
         )
@@ -696,6 +715,7 @@ if __name__ == "__main__":
     )
 
     # # Test on 1 batch
+    # t = time.time()
     # i = 0
     # batch_idx_start = i * batch_dim_chunk_size
     # batch_idx_end = (i + 1) * batch_dim_chunk_size
@@ -716,7 +736,9 @@ if __name__ == "__main__":
     #     dimension_arrays_dict,
     #     fill_value,
     # )
+    # print("main compute used: ", time.time() - t)
 
+    # t = time.time()
     # # Compute the batch dimension - batch_dim_idx (e.g., time)
     # assemble_batch_dimension(
     #     batch_dim_idx,
@@ -729,6 +751,7 @@ if __name__ == "__main__":
     #     num_chunks,
     #     variable_array_chunks,
     # )
+    # print("time compute used: ", time.time() - t)
     # exit()
 
     # Run entire dataset
@@ -776,5 +799,6 @@ if __name__ == "__main__":
         shape,
         num_chunks,
         variable_array_chunks,
+        data_type,
     )
 
