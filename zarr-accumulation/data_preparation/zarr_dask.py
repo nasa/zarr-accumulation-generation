@@ -111,6 +111,7 @@ def extract_data(
 
         # Get sum result and compute cumsum
         result = block_sums[:, :, current_idx:end_idx]
+        # print("data[:, :, idx_1:idx_2]", result.mean())
 
         ##### New change to adapt to user's defined final dimension order
         result_shape = result.shape
@@ -136,6 +137,7 @@ def extract_data(
         # Do first reshape
         result = result.reshape(reshape_1_shapes)
         # print("result.shape", result.shape)
+        # print("reshape 1", result.mean())
 
         # Transpose to bring together the same dims e.g., (nalat, nalon, clon, ctime) if they're not adjacent already
         # For lon, we'd go from (nalat, nalon, clat, ctime) -> (nalat, clat, nalon, ctime)
@@ -146,8 +148,12 @@ def extract_data(
         # print("new_indices", new_indices)
 
         # Apply sort_indices to result.transpose()
+        # result = result.transpose(tuple(sort_indices))
+        # print("result.shape", result.shape)  # lat: (25, 25, 144, 200)
+
         result = result.transpose(tuple(sort_indices))
         # print("result.shape", result.shape)  # lat: (25, 25, 144, 200)
+        # print("transpose 1", result.mean())
 
         # Second reshape operation to multiply the dim that appears more than once
         # E.g., lat: (nalat, nalon * clon, ctime), lon: (nalat * clat, nalon, ctime)
@@ -173,23 +179,26 @@ def extract_data(
                 ]
                 # reshape_2_shapes[-1] *= result.shape[idx]
                 # reshape_2_shapes[-1] *= result.shape[idx]
-        # print(reshape_2_shapes)  # Lat: [25, 3600, 200]
+        # print("reshape_2_shapes", reshape_2_shapes)  # Lat: [25, 3600, 200]
         # Apply the second reshape to result
         result = result.reshape(reshape_2_shapes)
         # print("result.shape", result.shape)  # lat: (25, 3600, 200)
+        # print("reshape 2", result.mean())
 
         # Compute cumsum over the accumulation dim (dim_idx)
         # Skip cumsum for batch dim
         if dim_i != batch_dim_idx:
-            for i in range(len(dim_idx)):
-                # print("dim_idx", dim_idx)
+            for i in dim_idx:
+                # print("dim_idx - cumsum axis", i)
                 result = result.cumsum(axis=i)
             # print("result.shape", result.shape)  # lat: (25, 3600, 200)
+            # print("cumsum", result.mean())
 
         # Final transpose to user-specified order, except for batch dim (e.g., time)
         if dim_i != batch_dim_idx:
             result = result.transpose(accumulation_dim_orders_idx[dim_i])
             # print("result.shape", result.shape)  # lat: (25, 200, 3600)
+            # print("transpose 2", result.mean())
 
         # Save result to Zarr
         assigning_slice = []
@@ -714,7 +723,7 @@ if __name__ == "__main__":
         "\n",
     )
 
-    # # Test on 1 batch
+    # Test on 1 batch
     # t = time.time()
     # i = 0
     # batch_idx_start = i * batch_dim_chunk_size
@@ -750,6 +759,7 @@ if __name__ == "__main__":
     #     shape,
     #     num_chunks,
     #     variable_array_chunks,
+    #     data_type,
     # )
     # print("time compute used: ", time.time() - t)
     # exit()
