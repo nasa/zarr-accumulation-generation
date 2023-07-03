@@ -7,7 +7,7 @@ import dask.array as da
 from dask import compute
 from numcodecs import Blosc
 from multiprocessing import Process
-from codec_filter import DeltaLat, DeltaLon, DeltaTime
+from codec_filter import AccumulationDeltaFilter
 from collections import OrderedDict
 from itertools import combinations
 
@@ -436,6 +436,7 @@ def assemble_batch_dimension(
         compressor=compressor,
         dtype=data_type,
         # Filter goes here after figuring out how to handle it
+        #filters=[AccumulationDeltaFilter(accumulation_dimensions[batch_dim_idx], accumulation_strides[batch_dim_idx], accumulation_dim_orders_idx[batch_dim_idx])],
         overwrite=True,
     )
     # Copy attribute file to new dataset
@@ -449,6 +450,7 @@ def assemble_batch_dimension(
         chunks=tuple(new_batch_array_chunks),
         compressor=compressor,
         # Filter goes here after figuring out how to handle it
+        #filters=[AccumulationDeltaFilter(accumulation_dimensions[batch_dim_idx], accumulation_strides[batch_dim_idx], accumulation_dim_orders_idx[batch_dim_idx])],
         dtype=data_type,
         overwrite=True,
     )
@@ -670,6 +672,7 @@ if __name__ == "__main__":
             compressor=compressor,
             dtype=data_type,
             # Filter goes here after figuring out how to handle it
+            #filters=[AccumulationDeltaFilter(accumulation_dimensions[dim_i], accumulation_strides[dim_i], accumulation_dim_orders_idx[dim_i])],
             overwrite=True,
         )
         dataset.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
@@ -682,6 +685,7 @@ if __name__ == "__main__":
             compressor=compressor,
             dtype=data_type,
             # Filter goes here after figuring out how to handle it
+            # May not be needed for weights
             overwrite=True,
         )
         dataset_weight.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
