@@ -4,6 +4,50 @@ from numcodecs.compat import ensure_ndarray
 import numpy as np
 
 
+class AccumulationDeltaFilter(Codec):
+    codec_id = 'delta_filter'
+
+    def __init__(self, accumulation_dimension, accumulation_stride, accumulation_dim_order_idx):
+        '''
+        accumulation_dimensions: [(0,), (1,), (2,), (0, 1)]
+        accumulation_strides: [(2,), (2,), (2,), (2, 2)]
+        accumulation_dim_orders: [('latitude', 'time', 'longitude'), ('longitude', 'time', 'latitude'), ('latitude', 'time', 'longitude'), ('latitude', 'longitude', 'time')]
+        accumulation_dim_orders_idx: [(0, 2, 1), (1, 2, 0), (0, 2, 1), (0, 1, 2)] 
+        ZHL  0 acc_lat
+        [25, 2000, 3600] [25, 200, 72]
+        acc_lat [25, 2000, 3600] [25, 200, 72]
+        ZHL  1 acc_lon
+        [25, 2000, 1800] [25, 200, 36]
+        acc_lon [25, 2000, 1800] [25, 200, 36]
+        ZHL  2 acc_time
+        [1800, 10, 3600] [36, 1, 72]
+        acc_time_temp [1800, 10, 3600] [36, 1, 72]
+        ZHL  3 acc_lat_lon
+        [25, 25, 2000] [25, 25, 200]
+        acc_lat_lon [25, 25, 2000] [25, 25, 200]
+        variable_array_chunks [ 72 144 200] 
+        '''
+        self.accumulation_dimension = accumulation_dimension
+        self.accumulation_stride = accumulation_stride
+        self.accumulation_dim_order_idx = accumulation_dim_order_idx
+        try:
+            self.accumulation_dimension_idx = list(accumulation_dim_order_idx).index(accumulation_dimension)
+        except ValueError:
+            print("accumulation_dimension not found.")
+
+
+    def encode(self, buf):
+        (_, a, b) = buf.shape
+        o = np.zeros((1, a, b), dtype='f4')
+        buf1 = np.concatenate((o, buf[:-1, :, :]), axis=0)
+        out = buf-buf1
+        return out
+
+    def decode(self, buf, out=None):
+        enc = np.frombuffer(buf, dtype='f4').reshape((25, 200, 144))
+        out = np.cumsum(enc, axis=0, out=out)
+        return out
+
 class DeltaLat(Codec):
     codec_id = 'delta_of_lat'
 
