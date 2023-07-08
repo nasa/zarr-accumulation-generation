@@ -7,26 +7,6 @@ class AccumulationDeltaFilter(Codec):
     codec_id = 'accumulation_delta_filter'
 
     def __init__(self, accumulation_dimension, accumulation_stride, accumulation_dim_order_idx):
-        '''
-        accumulation_dimensions: [(0,), (1,), (2,), (0, 1)]
-        accumulation_strides: [(2,), (2,), (2,), (2, 2)]
-        accumulation_dim_orders: [('latitude', 'time', 'longitude'), ('longitude', 'time', 'latitude'), ('latitude', 'time', 'longitude'), ('latitude', 'longitude', 'time')]
-        accumulation_dim_orders_idx: [(0, 2, 1), (1, 2, 0), (0, 2, 1), (0, 1, 2)] 
-        ZHL  0 acc_lat
-        [25, 2000, 3600] [25, 200, 72]
-        acc_lat [25, 2000, 3600] [25, 200, 72]
-        ZHL  1 acc_lon
-        [25, 2000, 1800] [25, 200, 36]
-        acc_lon [25, 2000, 1800] [25, 200, 36]
-        ZHL  2 acc_time
-        [1800, 10, 3600] [36, 1, 72]
-        acc_time_temp [1800, 10, 3600] [36, 1, 72]
-        ZHL  3 acc_lat_lon
-        [25, 25, 2000] [25, 25, 200]
-        acc_lat_lon [25, 25, 2000] [25, 25, 200]
-        variable_array_chunks [ 72 144 200] 
-        '''
-        #print("ZHL: ",accumulation_dimension, accumulation_stride, accumulation_dim_order_idx)
         self.accumulation_dimension = accumulation_dimension
         self.accumulation_stride = accumulation_stride
         self.accumulation_dim_order_idx = accumulation_dim_order_idx
