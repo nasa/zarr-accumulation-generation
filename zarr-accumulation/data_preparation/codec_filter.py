@@ -35,6 +35,7 @@ class AccumulationDeltaFilter(Codec):
 
 
     def encode(self, buf):
+        print(buf.shape)
         accumulation_dimension_idx = [index for index, item in enumerate(self.accumulation_dim_order_idx) if item in self.accumulation_dimension]
         accumulation_chunk_shape = list(buf.shape)
         for idx in accumulation_dimension_idx:
@@ -45,6 +46,7 @@ class AccumulationDeltaFilter(Codec):
         for idx in accumulation_dimension_idx:
             slices[idx] = slice(None, -1)
         try:
+            # IMPORTANT: ONLY 1-D filter suppoted now
             buf1 = np.concatenate((o, buf[tuple(slices)]), axis=accumulation_dimension_idx[0])
             out = buf-buf1
         except:
@@ -53,8 +55,10 @@ class AccumulationDeltaFilter(Codec):
         return out
 
     def decode(self, buf, out=None):
-        enc = np.frombuffer(buf, dtype='f4').reshape((25, 200, 144))
-        out = np.cumsum(enc, axis=0, out=out)
+        accumulation_dimension_idx = [index for index, item in enumerate(self.accumulation_dim_order_idx) if item in self.accumulation_dimension]
+        enc = np.frombuffer(buf, dtype='f4').reshape(buf.shape)
+        # IMPORTANT: ONLY 1-D filter suppoted now
+        out = np.cumsum(enc, axis=accumulation_dimension_idx[0], out=out)
         return out
 
 class DeltaLat(Codec):
