@@ -5,7 +5,7 @@ import numpy as np
 
 
 class AccumulationDeltaFilter(Codec):
-    codec_id = 'delta_filter'
+    codec_id = 'accumulation_delta_filter'
 
     def __init__(self, accumulation_dimension, accumulation_stride, accumulation_dim_order_idx):
         '''
@@ -27,20 +27,29 @@ class AccumulationDeltaFilter(Codec):
         acc_lat_lon [25, 25, 2000] [25, 25, 200]
         variable_array_chunks [ 72 144 200] 
         '''
+        #print("ZHL: ",accumulation_dimension, accumulation_stride, accumulation_dim_order_idx)
         self.accumulation_dimension = accumulation_dimension
         self.accumulation_stride = accumulation_stride
         self.accumulation_dim_order_idx = accumulation_dim_order_idx
-        try:
-            self.accumulation_dimension_idx = list(accumulation_dim_order_idx).index(accumulation_dimension)
-        except ValueError:
-            print("accumulation_dimension not found.")
+        return None
 
 
     def encode(self, buf):
-        (_, a, b) = buf.shape
-        o = np.zeros((1, a, b), dtype='f4')
-        buf1 = np.concatenate((o, buf[:-1, :, :]), axis=0)
-        out = buf-buf1
+        accumulation_dimension_idx = [index for index, item in enumerate(self.accumulation_dim_order_idx) if item in self.accumulation_dimension]
+        accumulation_chunk_shape = list(buf.shape)
+        for idx in accumulation_dimension_idx:
+            accumulation_chunk_shape[idx] = 1
+        accumulation_chunk_shape = tuple(accumulation_chunk_shape)
+        o = np.zeros(accumulation_chunk_shape, dtype='f4')
+        slices = [slice(None)] * len(buf.shape)
+        for idx in accumulation_dimension_idx:
+            slices[idx] = slice(None, -1)
+        try:
+            buf1 = np.concatenate((o, buf[tuple(slices)]), axis=accumulation_dimension_idx[0])
+            out = buf-buf1
+        except:
+            print(buf.shape, accumulation_chunk_shape, slices, accumulation_dimension_idx)
+            raise
         return out
 
     def decode(self, buf, out=None):
@@ -113,6 +122,7 @@ class DeltaTimeW(Codec):
         out = np.cumsum(enc, axis=1, out=out, dtype='uint32')
         return out
 
+numcodecs.register_codec(AccumulationDeltaFilter)
 numcodecs.register_codec(DeltaLat)
 numcodecs.register_codec(DeltaLon)
 numcodecs.register_codec(DeltaTime)

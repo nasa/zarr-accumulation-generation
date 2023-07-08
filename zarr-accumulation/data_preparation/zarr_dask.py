@@ -665,16 +665,27 @@ if __name__ == "__main__":
             # print("temp dim", dim)
             # print("temp dim_weight", dim_weight)
 
-        dataset = acc_group.create_dataset(
-            dim,
-            shape=arr_shape,
-            chunks=arr_chunks,
-            compressor=compressor,
-            dtype=data_type,
-            # Filter goes here after figuring out how to handle it
-            #filters=[AccumulationDeltaFilter(accumulation_dimensions[dim_i], accumulation_strides[dim_i], accumulation_dim_orders_idx[dim_i])],
-            overwrite=True,
-        )
+        if dim_i == batch_dim_idx or len(accumulation_dimensions[dim_i]) > 1:
+            dataset = acc_group.create_dataset(
+                dim,
+                shape=arr_shape,
+                chunks=arr_chunks,
+                compressor=compressor,
+                dtype=data_type,
+                # Filter goes here after figuring out how to handle it
+                overwrite=True,
+            )
+        else:
+            dataset = acc_group.create_dataset(
+                dim,
+                shape=arr_shape,
+                chunks=arr_chunks,
+                compressor=compressor,
+                dtype=data_type,
+                # Filter goes here after figuring out how to handle it
+                filters=[AccumulationDeltaFilter(accumulation_dimensions[dim_i], accumulation_strides[dim_i], accumulation_dim_orders_idx[dim_i])],
+                overwrite=True,
+            )
         dataset.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
         dataset.attrs["_ACCUMULATION_STRIDE"] = attributes_stride
 
