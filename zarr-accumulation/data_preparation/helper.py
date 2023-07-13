@@ -1,4 +1,5 @@
 import zarr
+import argparse
 from collections import OrderedDict
 from itertools import combinations
 
@@ -6,8 +7,20 @@ from itertools import combinations
 atribute file. Inside the group, accumulation datasets are created with attribute files. """
 
 if __name__ == "__main__":
+    import os
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-p",
+        "--path",
+        default="data/GPM_3IMERGHH_06_precipitationCal",
+        help="Path of Zarr store",
+    )
+    args = parser.parse_args()
+    path = args.path
+
     # Open input Zarr store
-    store_input = zarr.DirectoryStore("data/GPM_3IMERGHH_06_precipitationCal")
+    store_input = zarr.DirectoryStore(path)
     root = zarr.open(store_input)
     variable_array = root["variable"]
 
@@ -73,19 +86,6 @@ if __name__ == "__main__":
             shape=(0, 0, 0),  # Dummy empty shape, will update after getting stride info
             overwrite=True,
         )
-
-        # # Making the zattr for each dataset here while developing code
-        # if dim == "acc_lat" or dim == "acc_wt_lat":
-        #     stride_list = [2, 0, 0]
-        # if dim == "acc_lon" or dim == "acc_wt_lon":
-        #     stride_list = [0, 2, 0]
-        # if dim == "acc_lat_lon" or dim == "acc_wt_lat_lon":
-        #     stride_list = [2, 2, 0]
-        # if dim == "acc_time" or dim == "acc_wt_time":
-        #     stride_list = [0, 0, 2]
-        # # The dimension order can be changed
-        # dataset.attrs["_ARRAY_DIMENSIONS"] = ["latitude", "longitude", "time"]
-        # dataset.attrs["_ACCUMULATION_STRIDE"] = stride_list
 
         # Different dimensions order for each dataset
         if dim == "acc_lat" or dim == "acc_wt_lat":
