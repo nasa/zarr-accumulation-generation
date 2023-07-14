@@ -554,7 +554,7 @@ if __name__ == "__main__":
         from subprocess import call
 
         call(
-            ["python", "helper.py", "--path", "data/test_data",]
+            ["python", f"../data_preparation/helper.py", "--path", "data/test_data",]
         )
 
         # Open input Zarr store
