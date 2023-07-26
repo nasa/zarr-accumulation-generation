@@ -8,7 +8,7 @@ import dask.array as da
 from dask import compute
 from numcodecs import Blosc
 from multiprocessing import Process
-from codec_filter import DeltaLat, DeltaLon, DeltaTime
+from codec_filter import AccumulationDeltaFilter
 from collections import OrderedDict
 from itertools import combinations
 
@@ -437,6 +437,7 @@ def assemble_batch_dimension(
         compressor=compressor,
         dtype=data_type,
         # Filter goes here after figuring out how to handle it
+        #filters=[AccumulationDeltaFilter(accumulation_dimensions[batch_dim_idx], accumulation_strides[batch_dim_idx], accumulation_dim_orders_idx[batch_dim_idx])],
         overwrite=True,
     )
     # Copy attribute file to new dataset
@@ -450,6 +451,7 @@ def assemble_batch_dimension(
         chunks=tuple(new_batch_array_chunks),
         compressor=compressor,
         # Filter goes here after figuring out how to handle it
+        #filters=[AccumulationDeltaFilter(accumulation_dimensions[batch_dim_idx], accumulation_strides[batch_dim_idx], accumulation_dim_orders_idx[batch_dim_idx])],
         dtype=data_type,
         overwrite=True,
     )
@@ -715,15 +717,27 @@ if __name__ == "__main__":
             # print("temp dim", dim)
             # print("temp dim_weight", dim_weight)
 
-        dataset = acc_group.create_dataset(
-            dim,
-            shape=arr_shape,
-            chunks=arr_chunks,
-            compressor=compressor,
-            dtype=data_type,
-            # Filter goes here after figuring out how to handle it
-            overwrite=True,
-        )
+        if dim_i == batch_dim_idx or len(accumulation_dimensions[dim_i]) > 1:
+            dataset = acc_group.create_dataset(
+                dim,
+                shape=arr_shape,
+                chunks=arr_chunks,
+                compressor=compressor,
+                dtype=data_type,
+                # Filter goes here after figuring out how to handle it
+                overwrite=True,
+            )
+        else:
+            dataset = acc_group.create_dataset(
+                dim,
+                shape=arr_shape,
+                chunks=arr_chunks,
+                compressor=compressor,
+                dtype=data_type,
+                # Filter goes here after figuring out how to handle it
+                filters=[AccumulationDeltaFilter(accumulation_dimensions[dim_i], accumulation_strides[dim_i], accumulation_dim_orders_idx[dim_i])],
+                overwrite=True,
+            )
         dataset.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
         dataset.attrs["_ACCUMULATION_STRIDE"] = attributes_stride
 
@@ -734,6 +748,7 @@ if __name__ == "__main__":
             compressor=compressor,
             dtype=data_type,
             # Filter goes here after figuring out how to handle it
+            # May not be needed for weights
             overwrite=True,
         )
         dataset_weight.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
