@@ -4,11 +4,7 @@ import json
 import zarr
 
 sys.path.append("../data_preparation/")
-from codec_filter_small import (
-    DeltaLat,
-    DeltaLon,
-    DeltaTime,
-)
+from codec_filter import AccumulationDeltaFilter
 
 if __name__ == "__main__":
     store_path = os.path.join(
