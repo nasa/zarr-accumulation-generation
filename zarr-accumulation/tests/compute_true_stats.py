@@ -12,21 +12,26 @@ from codec_filter_small import (
 
 if __name__ == "__main__":
     store_path = os.path.join(
-        os.getcwd(), "..", "data_preparation", "data", "test_out",
+        os.getcwd(),
+        "..",
+        "data_preparation",
+        "data",
+        "test_data",
+        "variable_accumulation_group",
     )
 
     true_store = zarr.DirectoryStore(store_path)
     z_true = zarr.open(true_store, mode="r")
 
     dimension_stats_dict = {
-        "lat": None,
-        "latw": None,
-        "lon": None,
-        "lonw": None,
-        "latlon": None,
-        "latlonw": None,
-        "time": None,
-        "timew": None,
+        "acc_lat": None,
+        "acc_lat_lon": None,
+        "acc_lon": None,
+        "acc_time": None,
+        "acc_wt_lat": None,
+        "acc_wt_lat_lon": None,
+        "acc_wt_lon": None,
+        "acc_wt_time": None,
     }
 
     for key, val in dimension_stats_dict.items():
@@ -36,3 +41,4 @@ if __name__ == "__main__":
 
     with open("validation_checksums.json", "w") as outfile:
         json.dump(dimension_stats_dict, outfile)
+

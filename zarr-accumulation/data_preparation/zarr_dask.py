@@ -1,3 +1,4 @@
+import os
 import time
 import s3fs
 import zarr
@@ -509,8 +510,59 @@ if __name__ == "__main__":
     batch_size = 100
     batch_dim_idx = 2  # np.argmax(shape) Turn this into the largest dimension, keeping time now to validate with old code
 
-    # Open input Zarr store
-    store_input = zarr.DirectoryStore("data/GPM_3IMERGHH_06_precipitationCal")
+    test_mode = True
+    if test_mode:
+        # Create artificial data
+        np.random.seed(0)
+        clat, clon, ctime = 36, 72, 100
+        chunks = (clat, clon, ctime)
+        nlat, nlon, ntime = 144, 288, 200
+        shape = (nlat, nlon, ntime)
+
+        data_path = os.path.join("data", "test_data",)
+        root = zarr.open(data_path)
+        variable_data = np.random.rand(nlat, nlon, ntime).astype("f4")
+        variable_data[variable_data < 0.2] = -99
+        root.create_dataset(
+            "variable", shape=shape, chunks=chunks, data=variable_data, overwrite=True
+        )
+        root.create_dataset(
+            "latitude",
+            shape=nlat,
+            chunks=clat,
+            data=np.arange(-89.95, 90, 0.1)[:nlat],
+            overwrite=True,
+        )
+        root.create_dataset(
+            "longitude",
+            shape=nlon,
+            chunks=clon,
+            data=np.arange(-179.95, 179.95, 0.1)[:nlon],
+            overwrite=True,
+        )
+        time_data = np.arange(
+            np.datetime64("2000-06-01"),
+            np.datetime64("2000-12-26"),
+            np.timedelta64(30, "m"),
+            dtype="datetime64[m]",
+        )[:ntime]
+        root.create_dataset(
+            "time", shape=ntime, chunks=ctime, data=time_data, overwrite=True
+        )
+
+        # Run helper.py script
+        from subprocess import call
+
+        call(
+            ["python", f"../data_preparation/helper.py", "--path", "data/test_data",]
+        )
+
+        # Open input Zarr store
+        store_input = zarr.DirectoryStore(data_path)
+    else:
+        # Open input Zarr store
+        store_input = zarr.DirectoryStore("data/GPM_3IMERGHH_06_precipitationCal")
+
     root = zarr.open(store_input)
     variable_array = root["variable"]
 
