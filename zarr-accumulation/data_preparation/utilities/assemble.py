@@ -1,6 +1,7 @@
 import numpy as np
 import dask.array as da
 from numcodecs import Blosc
+import utilities.compute as compute_functions
 
 
 def extract_data(
@@ -13,6 +14,27 @@ def extract_data(
     current_idx,
     weights_flag,
 ):
+    """
+    Extract and update accumulation data in Zarr arrays based on block_sums.
+
+    This function extracts computed accumulation data from block_sums and updates corresponding Zarr arrays.
+    The extracted data is reshaped and transposed to match the required dimensions.
+
+    Args:
+        data_info_dict (dict): A dictionary containing various information about the data and accumulations.
+        block_sums (numpy.ndarray): An array containing computed sums for data blocks.
+        batch_dim_idx (int): Index of the batch dimension.
+        batch_idx_start (int): Start index for the batch dimension slice.
+        batch_idx_end (int): End index for the batch dimension slice.
+        idx_acc (int): Accumulation index to update in the Zarr arrays.
+        current_idx (int): Current index in flattened outputs.
+        weights_flag (bool): Flag indicating whether the weights or the data are being processed.
+
+    Returns:
+        int: The updated current_idx in flattened outputs.
+
+    """
+
     for dim_i, dim_idx in enumerate(data_info_dict["accumulation_dimensions"]):
         # Get idx of array in flattened outputs
         chunk_indices = np.arange(0, len(block_sums.shape))
@@ -65,8 +87,8 @@ def extract_data(
                 reshape_2_shapes.append(result.shape[idx])
                 seen_indices.append(value)
             else:
-                # If duplicate value, multiply the corresponing element in
-                # result.shape with with idx that's the same
+                # If duplicate value, multiply the corresponding element in
+                # result.shape with idx that's the same
                 reshape_2_shapes[np.where(seen_indices == value)[0][0]] *= result.shape[
                     idx
                 ]
@@ -113,16 +135,96 @@ def extract_data(
     return current_idx
 
 
+def compute_assemble_zarr(
+    data_info_dict,
+    variable_array_dask,
+    batch_dim_idx,
+    batch_idx_start,
+    batch_idx_end,
+):
+    """
+    Compute and assemble Zarr arrays based on the computed block sums.
+
+    This function computes and assembles Zarr arrays based on the computed block sums for a specified batch
+    dimension range. It extracts data and weights from the block sums and updates corresponding Zarr arrays.
+
+    Args:
+        data_info_dict (dict): A dictionary containing various information about the data and accumulations.
+        variable_array_dask (dask.array.Array): A Dask array representing the variable data.
+        batch_dim_idx (int): Index of the batch dimension.
+        batch_idx_start (int): Start index for the batch dimension slice.
+        batch_idx_end (int): End index for the batch dimension slice.
+
+    """
+
+    idx_acc = int(
+        batch_idx_start / data_info_dict["variable_array_chunks"][batch_dim_idx]
+    )
+
+    # Compute block sums using compute_block_sum function
+    slice_list = [slice(None)] * variable_array_dask.ndim
+    slice_list[batch_dim_idx] = slice(batch_idx_start, batch_idx_end)
+    variable_block = variable_array_dask[tuple(slice_list)]
+
+    block_sums = variable_block.map_blocks(
+        compute_functions.compute_block_sum,
+        data_info_dict["fill_value"],
+        data_info_dict["accumulation_dimensions"],
+        chunks=data_info_dict["variable_array_chunks"],
+        dimension_arrays_dict=data_info_dict["dimension_arrays_dict"],
+    ).compute()
+
+    # Extract data and weights from block sums and update Zarr arrays
+    current_idx = extract_data(
+        data_info_dict,
+        block_sums,
+        batch_dim_idx,
+        batch_idx_start,
+        batch_idx_end,
+        idx_acc,
+        current_idx=0,
+        weights_flag=False,
+    )
+
+    current_idx = extract_data(
+        data_info_dict,
+        block_sums,
+        batch_dim_idx,
+        batch_idx_start,
+        batch_idx_end,
+        idx_acc,
+        current_idx=current_idx,
+        weights_flag=True,
+    )
+    return
+
+
 def setup_batch_dimension(
     data_info_dict,
     batch_dim_idx,
-    batch_dim_idx_2=0,
-    n_threads=9,
+    batch_dim_idx_2,
+    n_threads,
 ):
+    """
+    Setup and configure Zarr arrays for batch dimension processing.
+
+    This function sets up and configures Zarr arrays for processing the batch dimension of the data. It creates
+    new datasets and arrays, adapts shapes and chunks for the batch dimension, and prepares data structures for
+    parallel processing.
+
+    Args:
+        data_info_dict (dict): A dictionary containing various information about the data and accumulations.
+        batch_dim_idx (int): Index of the batch dimension.
+        batch_dim_idx_2 (int): Index of the secondary batch dimension to batch over.
+        n_threads (int): Number of threads for parallel processing.
+
+    Returns:
+        dict: A dictionary containing batch-related configuration and datasets.
+
+    """
+
     compressor = Blosc(cname="zstd", clevel=5, shuffle=Blosc.SHUFFLE)
 
-    # Pick the first dimension (e.g., lat or 0) to batch over
-    # batch_dim_idx_2 and n_threads can perhaps become user-selected parameters
     accumulation_group = data_info_dict["accumulation_group"]
     data_type = data_info_dict["data_type"]
     shape = data_info_dict["shape"]
@@ -131,17 +233,14 @@ def setup_batch_dimension(
     acc_dim_name_temp = acc_dim_name + "_temp"
     acc_dim_name_weight = data_info_dict["accumulation_weight_names"][batch_dim_idx]
     acc_dim_name_temp_weight = acc_dim_name_weight + "_temp"
-    # print(f"Final assembly for dimension: {acc_dim_name} & {acc_dim_name_temp_weight}")
 
     attributes_dim = accumulation_group[acc_dim_name].attrs["_ARRAY_DIMENSIONS"]
     attributes_stride = accumulation_group[acc_dim_name].attrs["_ACCUMULATION_STRIDE"]
-    # print(attributes_dim, attributes_stride)
 
     # Always a 1-element tuple e.g., (2,)
     batch_dim_stride = data_info_dict["accumulation_strides"][batch_dim_idx][0]
-    # print("batch_dim_stride", batch_dim_stride)
 
-    # Create final dataset and run compute for the batch dimension (e.g., time)
+    # Create final dataset to run compute for the batch dimension (e.g., time)
     num_chunks_final = int(
         data_info_dict["num_chunks"][batch_dim_idx] / batch_dim_stride
     )
@@ -150,13 +249,13 @@ def setup_batch_dimension(
     )
     batch_size_per_thread = int(shape[batch_dim_idx_2] / n_threads)
 
+    # Make final shape and chunks for this dim
     new_batch_array_shape = []
     new_batch_array_chunks = []
-    # Make final shape and chunks for this dim
-    dim_idx_tuple = data_info_dict["accumulation_dimensions"][batch_dim_idx]  # (2,)
-    dim_order_idx = data_info_dict["accumulation_dim_orders_idx"][
-        batch_dim_idx
-    ]  # (0, 2, 1)
+    # e.g., (2,)
+    dim_idx_tuple = data_info_dict["accumulation_dimensions"][batch_dim_idx]
+    # e.g., # (0, 2, 1)
+    dim_order_idx = data_info_dict["accumulation_dim_orders_idx"][batch_dim_idx]
     for idx_val in dim_order_idx:
         if idx_val in dim_idx_tuple:
             # Append number of chunks in the accumulation dimension
@@ -170,8 +269,6 @@ def setup_batch_dimension(
         else:
             new_batch_array_shape.append(shape[idx_val])
             new_batch_array_chunks.append(shape[idx_val])
-    # print("new_batch_array_shape:", new_batch_array_shape)
-    # print("array_chunk:", new_batch_array_chunks, "\n")
 
     batch_dataset = accumulation_group.create_dataset(
         acc_dim_name,
@@ -187,7 +284,7 @@ def setup_batch_dimension(
     batch_dataset.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
     batch_dataset.attrs["_ACCUMULATION_STRIDE"] = attributes_stride
 
-    # The same for weights
+    # Do the same for weights
     batch_dataset_weight = accumulation_group.create_dataset(
         acc_dim_name_weight,
         shape=tuple(new_batch_array_shape),
@@ -198,18 +295,15 @@ def setup_batch_dimension(
         dtype=data_type,
         overwrite=True,
     )
-    # Copy attribute file to new dataset
     batch_dataset_weight.attrs["_ARRAY_DIMENSIONS"] = attributes_dim
     batch_dataset_weight.attrs["_ACCUMULATION_STRIDE"] = attributes_stride
 
-    # Data array
+    # Make dask data and weight arrays
     batch_array_dask = da.from_array(
         accumulation_group[acc_dim_name_temp],
         accumulation_group[acc_dim_name_temp].shape,
     )
-    # print("batch_array_dask.shape", batch_array_dask.shape)
 
-    # Weight array
     batch_array_dask_weight = da.from_array(
         accumulation_group[acc_dim_name_temp_weight],
         accumulation_group[acc_dim_name_temp_weight].shape,

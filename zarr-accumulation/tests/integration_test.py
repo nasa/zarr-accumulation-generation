@@ -2,23 +2,102 @@ import os
 import sys
 import zarr
 import shutil
-import runpy
 import unittest
+import numpy as np
+from subprocess import call
 
 sys.path.append("../data_preparation/")
 from codec_filter import AccumulationDeltaFilter
 
 
 class Test_zarr_accumulation_entrypoint(unittest.TestCase):
-    def test_random_data(self):
-        # Call zarr accumulation entrypoint - still write out data to file
-        script_path = os.path.join(
-            os.getcwd(),
-            "..",
-            "data_preparation",
-            "main.py",
+    """
+    Test class for validating the Zarr accumulation data prepration code.
+
+    This class defines unit tests to validate the functionality of the Zarr accumulation data prepration code. It sets up
+    random Zarr test data, runs the main entrypoint script, and validates the output Zarr accumulation arrays against expected
+    checksums.
+
+    """
+
+    def setUp(self):
+        """
+        Set up random test data and environment for testing.
+
+        This method creates random test data using Zarr, including variable data, latitude, longitude, and time
+        information. It also runs the 'helper.py' script to prepare the data for accumulation computation.
+
+        Returns:
+            str: The path to the created data.
+
+        """
+        # Create random Zarr store
+        np.random.seed(0)
+        clat, clon, ctime = 36, 72, 100
+        chunks = (clat, clon, ctime)
+        nlat, nlon, ntime = 144, 288, 200
+        shape = (nlat, nlon, ntime)
+
+        data_path = os.path.join(
+            "data",
+            "test_data",
         )
-        runpy.run_path(script_path, run_name="__main__")
+        root = zarr.open(data_path)
+        variable_data = np.random.rand(nlat, nlon, ntime).astype("f4")
+        variable_data[variable_data < 0.2] = -99
+        root.create_dataset(
+            "variable", shape=shape, chunks=chunks, data=variable_data, overwrite=True
+        )
+        root.create_dataset(
+            "latitude",
+            shape=nlat,
+            chunks=clat,
+            data=np.arange(-89.95, 90, 0.1)[:nlat],
+            overwrite=True,
+        )
+        root.create_dataset(
+            "longitude",
+            shape=nlon,
+            chunks=clon,
+            data=np.arange(-179.95, 179.95, 0.1)[:nlon],
+            overwrite=True,
+        )
+        time_data = np.arange(
+            np.datetime64("2000-06-01"),
+            np.datetime64("2000-12-26"),
+            np.timedelta64(30, "m"),
+            dtype="datetime64[m]",
+        )[:ntime]
+        root.create_dataset(
+            "time", shape=ntime, chunks=ctime, data=time_data, overwrite=True
+        )
+
+        call(
+            [
+                "python",
+                f"../data_preparation/helper.py",
+                "--path",
+                "../tests/data/test_data",
+            ]
+        )
+        return data_path
+
+    def test_random_data(self):
+        """
+        Test the Zarr accumulation code with random data and validate the output.
+
+        This method calls the Zarr accumulation entrypoint script, validates the output Zarr arrays against expected
+        checksums, and cleans up the local test output store.
+
+        """
+        call(
+            [
+                "python",
+                "../data_preparation/main.py",
+                "--data_path",
+                "data/test_data",
+            ]
+        )
 
         true_checksums = {
             "acc_lat": "89705ef22dd704d2161fa280a0a2e898f2013935",
@@ -31,7 +110,7 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
             "acc_wt_time": "7db7ff5d251a4e384608cc7e83b2a1679c648682",
         }
 
-        # Validate
+        # Validate checksums of test output vs true checksums
         output_path = os.path.join(
             "data",
             "test_data",
