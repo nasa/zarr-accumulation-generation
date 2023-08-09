@@ -13,7 +13,10 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
     def test_random_data(self):
         # Call zarr accumulation entrypoint - still write out data to file
         script_path = os.path.join(
-            os.getcwd(), "..", "data_preparation", "zarr_dask.py",
+            os.getcwd(),
+            "..",
+            "data_preparation",
+            "main.py",
         )
         runpy.run_path(script_path, run_name="__main__")
 
@@ -29,7 +32,11 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
         }
 
         # Validate
-        output_path = os.path.join("data", "test_data", "variable_accumulation_group",)
+        output_path = os.path.join(
+            "data",
+            "test_data",
+            "variable_accumulation_group",
+        )
         z_output = zarr.open(output_path, mode="r")
 
         for dim, checksum in true_checksums.items():
