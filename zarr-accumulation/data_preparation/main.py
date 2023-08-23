@@ -3,7 +3,7 @@ import argparse
 from multiprocessing import Process
 import utilities.compute as compute_functions
 import utilities.assemble as assemble_functions
-import utilities.setup as setup_functions
+import utilities.setup_utils as setup_functions
 
 
 def setup_args():
