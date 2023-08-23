@@ -4,7 +4,8 @@ import zarr
 import shutil
 import unittest
 import numpy as np
-from subprocess import call
+import runpy
+from subprocess import run
 
 sys.path.append("../data_preparation/")
 from codec_filter import AccumulationDeltaFilter
@@ -72,7 +73,7 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
             "time", shape=ntime, chunks=ctime, data=time_data, overwrite=True
         )
 
-        call(
+        run(
             [
                 "python",
                 f"../data_preparation/helper.py",
@@ -90,14 +91,19 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
         checksums, and cleans up the local test output store.
 
         """
-        call(
+        run(
             [
-                "python",
+                "coverage",
+                "run",
                 "../data_preparation/main.py",
                 "--data_path",
                 "data/test_data",
             ]
         )
+        # Save report as plain text and html
+        with open("../../coverage_report.txt", "w") as f:
+            run(["coverage", "report", "-m"], stdout=f)
+        run(["coverage", "html", "--dir", "../../htmlcov"])
 
         true_checksums = {
             "acc_lat": "89705ef22dd704d2161fa280a0a2e898f2013935",
