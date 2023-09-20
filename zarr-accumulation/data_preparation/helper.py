@@ -13,7 +13,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "-p",
         "--path",
-        default="data/GPM_3IMERGHH_06_precipitationCal",
         help="Path of Zarr store",
     )
     args = parser.parse_args()
@@ -25,8 +24,10 @@ if __name__ == "__main__":
     variable_array = root["variable"]
 
     # Create accumulation group and the attribute file in JSON format
-    acc_group = root.create_group("variable_accumulation_group", overwrite=True)
-    acc_group.attrs["_ACCUMULATION_GROUP"] = {
+    accumulation_group = root.create_group(
+        "variable_accumulation_group", overwrite=True
+    )
+    accumulation_group.attrs["_ACCUMULATION_GROUP"] = {
         "latitude": {
             "_DATA_WEIGHTED": "acc_lat",
             "_WEIGHTS": "acc_wt_lat",
@@ -46,7 +47,7 @@ if __name__ == "__main__":
     }
 
     # Assuming the attributes are pre-defined, read them in as a dictionary
-    acc_attrs = OrderedDict(acc_group.attrs)
+    acc_attrs = OrderedDict(accumulation_group.attrs)
     dimensions = acc_attrs["_ACCUMULATION_GROUP"].keys()
     print("acc_attrs:", acc_attrs, "\n")
 
@@ -81,7 +82,7 @@ if __name__ == "__main__":
 
     # Innitialize data arrays for accumulation datasets
     for dim in accumulation_names + accumulation_weight_names:
-        dataset = acc_group.create_dataset(
+        dataset = accumulation_group.create_dataset(
             dim,
             shape=(0, 0, 0),  # Dummy empty shape, will update after getting stride info
             overwrite=True,
