@@ -36,8 +36,9 @@ jobs:
     - name: Generate coverage report
       if: ${{ always() }}
       run: |
-        mv coverage_report.txt coverage_report-${{ matrix.python-version }}.txt &&
-        mv htmlcov htmlcov-${{ matrix.python-version }}
+        cd zarr-accumulation/tests/ &&
+        coverage report -m >& ../../coverage_report-${{ matrix.python-version }}.txt &&
+        coverage html --dir ../../htmlcov-${{ matrix.python-version
         
     - name: Archive test results
       if: ${{ always() }}

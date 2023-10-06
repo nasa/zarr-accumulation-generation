@@ -5,7 +5,9 @@ import shutil
 import unittest
 import numpy as np
 import runpy
+import argparse
 from subprocess import run
+from unittest import mock
 
 sys.path.append("../data_preparation/")
 from codec_filter import AccumulationDeltaFilter
@@ -83,7 +85,17 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
         )
         return data_path
 
-    def test_random_data(self):
+    @mock.patch(
+        "argparse.ArgumentParser.parse_args",
+        return_value=argparse.Namespace(
+            batch_size=100,
+            batch_dim_idx=2,
+            batch_dim_idx_2=0,
+            n_threads=9,
+            data_path="data/test_data",
+        ),
+    )
+    def test_random_data(self, mock_args):
         """
         Test the Zarr accumulation code with random data and validate the output.
 
@@ -91,19 +103,7 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
         checksums, and cleans up the local test output store.
 
         """
-        run(
-            [
-                "coverage",
-                "run",
-                "../data_preparation/main.py",
-                "--data_path",
-                "data/test_data",
-            ]
-        )
-        # Save report as plain text and html
-        with open("../../coverage_report.txt", "w") as f:
-            run(["coverage", "report", "-m"], stdout=f)
-        run(["coverage", "html", "--dir", "../../htmlcov"])
+        runpy.run_module("main", run_name="__main__")
 
         true_checksums = {
             "acc_lat": "89705ef22dd704d2161fa280a0a2e898f2013935",
