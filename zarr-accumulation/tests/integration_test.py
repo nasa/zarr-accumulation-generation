@@ -23,7 +23,13 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
 
     """
 
-    def setUp(self):
+    @mock.patch(
+        "argparse.ArgumentParser.parse_args",
+        return_value=argparse.Namespace(
+            path="data/test_data",
+        ),
+    )
+    def setUp(self, mock_args):
         """
         Set up random test data and environment for testing.
 
@@ -75,14 +81,7 @@ class Test_zarr_accumulation_entrypoint(unittest.TestCase):
             "time", shape=ntime, chunks=ctime, data=time_data, overwrite=True
         )
 
-        run(
-            [
-                "python",
-                f"../data_preparation/helper.py",
-                "--path",
-                "../tests/data/test_data",
-            ]
-        )
+        runpy.run_module("helper", run_name="__main__")
         return data_path
 
     @mock.patch(
