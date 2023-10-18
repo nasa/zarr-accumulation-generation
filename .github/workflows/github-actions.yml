@@ -39,7 +39,7 @@ jobs:
         cd zarr-accumulation/tests/ &&
         coverage report -m >& ../../coverage_report-${{ matrix.python-version }}.txt &&
         coverage html --dir ../../htmlcov-${{ matrix.python-version }}
-
+        
     - name: Archive test results
       if: ${{ always() }}
       uses: actions/upload-artifact@v2
