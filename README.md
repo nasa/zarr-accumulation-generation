@@ -1,5 +1,7 @@
 # Zarr-based chunk-level cumulative sums in reduced dimensions
 
+This software is currently in beta pre-release.
+
 ## Overview <br>
 Standard data analysis operations on multidimensional data in Zarr format often involve averaging along one or more dimensions. Standard methods requires a full scan of the data, making them computationally intensive, especially for large datasets. This algorithm provides an efficient and cost-effective approach for performing multidimensional averaging in Zarr format. It's particularly well-suited and useful for cloud or distributed systems but is also adaptable for local use. This method eliminates the need to read all data values by pre-computing cumulative sums ("accumulation" for short) along reduced data dimensions. The resulting accumulation data is saved as a small, adjustable set of auxiliary data on top of the untouched raw data and is used to quickly find the data averages along one or more dimensions. In this repository, we provide the source code for the generation of the accumulation data. The source code for using the accumulation data in averaging services is provided in a separate repository, [zarr-accumulation-service](https://github.com/nasa/zarr-accumulation-service). 
 
