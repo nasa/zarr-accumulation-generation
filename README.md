@@ -7,7 +7,11 @@ Standard data analysis operations on multidimensional data in Zarr format often 
 
 
 ## Requirements <br>
-The required Python packages for using the algorithm are provided in `requirements/core.txt` and can be installed using pip with the command: `pip install -r requirements/core.txt`. Additional packages required for running tests are provided in `requirements/core.txt`.
+The required Python packages for using the algorithm are provided in `requirements/core.txt` and can be installed using pip with the following command:
+
+`pip install -r requirements/core.txt`
+
+Additional packages required for running tests are provided in `requirements/test.txt`.
 
 
 ## How to use <br>
