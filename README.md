@@ -123,7 +123,17 @@ The datasets inside the accumulation group will be populated with the accumulati
 ```
 
 ## Testing <br>
-The integration test using an auto-generated small 3-D dataset can be run from the home directory of this repository with the following command: `bin/test`. 
+The integration test using an auto-generated small 3-D dataset can be run from the home directory of this repository with the following bash script:
+`bin/test`.
+Note that the python requirement `requirements/test.txt` needs to be installed before running the test.
+The test should complete successfully, with the final part of the output appearing similar to the following:
+```
+.
+----------------------------------------------------------------------
+Ran 1 test in 1.902s
+
+OK
+```
 
 ### Reference
 Zhang, H., Hegde, M., Smit, C., Pham, L., Pagan, B., & Nguyen, D.M. (2023). [ZEP 5 — Zarr-based Chunk-level Accumulation in Reduced Dimensions](https://github.com/zarr-developers/zeps/blob/main/draft/ZEP0005.md). In <i>Zarr Enhancement Proposals Github Repository.</i>
