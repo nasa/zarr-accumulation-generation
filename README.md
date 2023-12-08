@@ -16,7 +16,7 @@ Additional packages required for running tests are provided in `requirements/tes
 
 ## How to use <br>
 
-This code takes as input a Zarr store of multidimensional data stored under `zarr-accumulation/data_preparation/data/`. For example, a Zarr store "GPM_3IMERGHH_06_precipitationCal" of three dimensions (latitude, longitude, and time), is organized as follows:
+This code takes as input a Zarr store of multidimensional data stored under `zarr-accumulation/data_preparation/data/`. This dataset follows the convention defined in the Zarr Enhancement Proposal 5, or [ZEP 5, Zarr-based Chunk-level Accumulation in Reduced Dimensions](https://github.com/zarr-developers/zeps/blob/main/draft/ZEP0005.md). For example, a Zarr store "GPM_3IMERGHH_06_precipitationCal" of three dimensions (latitude, longitude, and time), is organized as follows:
 ```
 .
 └── zarr-accumulation
@@ -39,14 +39,14 @@ This code takes as input a Zarr store of multidimensional data stored under `zar
 ```
 
 ### 1. Set up Zarr store for accumulation generation with helper script
-#### Input
-`--path` or `-p` (str): Relative path of the Zarr store. Example: `data/GPM_3IMERGHH_06_precipitationCal/`.
-
-#### Usage
 The script `zarr-accumulation/data_preparation/helper.py` allows the user to customize and create an accumulation group inside the Zarr store to house the generated accumulation data. Inside the group, accumulation datasets are created with attribute files as part of the metadata. Actual chunks are produced in step 2. 
 
 The Zarr attribute file of the accumulation group and of the accumulation data arrays are described in detail in the Zarr Enhancement Proposal, or [ZEP 5, Zarr-based Chunk-level Accumulation in Reduced Dimensions](https://github.com/zarr-developers/zeps/blob/main/draft/ZEP0005.md). 
 
+#### Input
+`--path` or `-p` (str): Relative path of the Zarr store. Example: `data/GPM_3IMERGHH_06_precipitationCal/`.
+
+#### Usage
 Run the helper script with the following command: `python helper.py --path [Path of Zarr store]`. Example: `python helper.py --path data/GPM_3IMERGHH_06_precipitationCal/`.
 
 #### Output 
@@ -88,6 +88,8 @@ An accumulation group will be created inside the Zarr store and the group includ
 ```
 
 ### 2. Generate accumulation data
+The entrypoint script `zarr-accumulation/data_preparation/main.py` will take the above command-line arguments, processes data parameters, performs batch processing using parallel computation, to generate the accumulation data and write these data arrays to the accumulation group datasets.
+
 #### Input
 - `--batch_size` (int): Batch size along the specified dimension (e.g., time). Default: 100.
 - `--batch_dim_idx` (int): The index of the first batch dimension (e.g., `2` for time). Default: 2. 
@@ -96,7 +98,7 @@ An accumulation group will be created inside the Zarr store and the group includ
 - `--data_path` (str): Relative path of the Zarr store. Example: `data/GPM_3IMERGHH_06_precipitationCal/`.
 
 #### Usage 
-The entrypoint script `zarr-accumulation/data_preparation/main.py` will take the above command-line arguments, processes data parameters, performs batch processing using parallel computation, to generate the accumulation data and write these data arrays to the accumulation group datasets. Run the script with the following command with user-specified arguments or defaults: `python main.py --batch_size [batch size] --batch_dim_idx [first index] --batch_dim_idx_2 [second index] --n_threads [number of threads] --data_path [path]`.
+Run the script with the following command with user-specified arguments or defaults: `python main.py --batch_size [batch size] --batch_dim_idx [first index] --batch_dim_idx_2 [second index] --n_threads [number of threads] --data_path [path]`.
 
 #### Output 
 The datasets inside the accumulation group will be populated with the accumulation chunk data. For example, the `acc_lat` dataset will have the following chunks stored next to the metadata:
